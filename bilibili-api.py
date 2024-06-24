@@ -171,10 +171,11 @@ def write_to_rss_xml(channel, text):
 def scan_channel_dir_to_generate_items_xml(channel):
     logging.info("===> start scan channel videos and generate item " + channel)
     items = []
-    for video in os.listdir(base_path + channel):
-        if os.path.isdir(full_path(channel) + "/" + video):
-            video_meta = load_channel_video_meta(channel, video)
-            mp3 = full_path(channel) + "/" + video + "/" + video + ".mp3"
+    for video in load_channel_videos(channel):
+        bv = video['bvid']
+        if os.path.isdir(full_path(channel) + "/" + bv):
+            video_meta = load_channel_video_meta(channel, bv)
+            mp3 = full_path(channel) + "/" + bv + "/" + bv + ".mp3"
             item = Template(item_template).substitute(
                 {
                     "title": video_meta["title"],
@@ -182,7 +183,7 @@ def scan_channel_dir_to_generate_items_xml(channel):
                     "url": rss_url_prefix + mp3,
                     "duration": video_meta["duration"],
                     "length": os.path.getsize(mp3),
-                    "link": bilibili_link_prefix + video_meta["bvid"],
+                    "link": bilibili_link_prefix + bv,
                     "date": timestamp_to_date(video_meta["pubdate"]),
                 }
             )
