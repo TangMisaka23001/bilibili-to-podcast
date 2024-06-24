@@ -1,2 +1,10 @@
 # bilibili-to-podcast
-bilibili video channel collectiondetail to podcast feed xml
+将哔哩哔哩的视频合集转化为播客链接在podcast应用中播放。
+
+## 使用方式
+参照`config.yaml`配置合集的uid和sid。 例如：`https://space.bilibili.com/4698846/channel/collectiondetail?sid=705718&ctype=0`
+
+## TODO
+- [ ] docker build
+- [ ] github action
+- [ ] support OSS upload
