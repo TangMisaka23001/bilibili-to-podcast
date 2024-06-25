@@ -1,8 +1,9 @@
-rss_url_prefix: https://bilibili-podcast.oss-rg-china-mainland.aliyuncs.com/
-newest_vides_first: false
-fetch_recent_n_videos: 0
+RSS_URL_PREFIX: https://bilibili-podcast.oss-rg-china-mainland.aliyuncs.com/
+NEWEST_VIDES_FIRST: false
+FETCH_RECENT_N_VIDEOS: 0
 channel:
   - uid: 391930545
     sid: 598034
-  # - uid: 56344967
-  #   sid: 350787
+  # - uid: 1571561781
+  #   sid: 2586487
+

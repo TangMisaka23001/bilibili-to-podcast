@@ -10,9 +10,9 @@ from bilibili_api import channel_series, video as video_api
 import yt_dlp
 from xml_template import item_template, channel_template, feed_xml_template
 
-rss_url_prefix = ""
-fetch_recent_n_videos = 0
-newest_vides_first = False
+RSS_URL_PREFIX = ""
+NEWEST_VIDES_FIRST = 0
+FETCH_RECENT_N_VIDEOS = False
 base_path = "bilibili-channel/"
 bilibili_link_prefix = "https://www.bilibili.com/video/"
 
@@ -38,12 +38,12 @@ def load_config():
         config = yaml.safe_load(f)
         logging.info("===> load config.yaml")
         logging.info(config)
-        global rss_url_prefix
-        global fetch_recent_n_videos
-        global newest_vides_first
-        rss_url_prefix = config["rss_url_prefix"]
-        fetch_recent_n_videos = config["fetch_recent_n_videos"]
-        newest_vides_first = config["newest_vides_first"]
+        global RSS_URL_PREFIX
+        global FETCH_RECENT_N_VIDEOS
+        global NEWEST_VIDES_FIRST
+        RSS_URL_PREFIX = config["RSS_URL_PREFIX"]
+        FETCH_RECENT_N_VIDEOS = config["FETCH_RECENT_N_VIDEOS"]
+        NEWEST_VIDES_FIRST = config["NEWEST_VIDES_FIRST"]
         return config
 
 
@@ -74,14 +74,12 @@ def load_channel_meta(channel):
 
 
 async def aget_videos(pn):
-    global newest_vides_first
-    if newest_vides_first:
+    if NEWEST_VIDES_FIRST:
         return await series.get_videos(pn=pn, sort=channel_series.ChannelOrder.CHANGE)
     return await series.get_videos(pn=pn)
 
 
 async def get_channel_videos(channel_meta):
-    global fetch_recent_n_videos
     series = get_channel_series(id=channel_meta["id"], uid=channel_meta["mid"])
     # 合集有分页，这里需要解开分页返回全部视频信息
     pn = 1
@@ -89,8 +87,8 @@ async def get_channel_videos(channel_meta):
     while True:
         page_videos = await series.get_videos(pn=pn)
         result += page_videos["archives"]
-        if fetch_recent_n_videos > 0 and len(result) >= fetch_recent_n_videos:
-            return result[:fetch_recent_n_videos]
+        if FETCH_RECENT_N_VIDEOS > 0 and len(result) >= FETCH_RECENT_N_VIDEOS:
+            return result[:FETCH_RECENT_N_VIDEOS]
         if len(result) >= channel_meta["media_count"]:
             break
         pn += 1
@@ -169,7 +167,7 @@ def get_channel_bilibili_link(uid, sid):
 
 
 def write_to_rss_xml(channel, text):
-    path = str(channel) + "-rss.xml"
+    path = base_path + str(channel) + "-rss.xml"
     with open(path, "w", encoding="utf-8") as f:
         f.write(text)
 
@@ -186,7 +184,7 @@ def scan_channel_dir_to_generate_items_xml(channel):
                 {
                     "title": video_meta["title"],
                     "description": video_meta["desc"],
-                    "url": rss_url_prefix + mp3,
+                    "url": RSS_URL_PREFIX + mp3,
                     "duration": video_meta["duration"],
                     "length": os.path.getsize(mp3),
                     "link": bilibili_link_prefix + bv,
@@ -202,7 +200,7 @@ def generate_channel_xml(channel):
     channel_meta = load_channel_meta(channel)
     channel_string = Template(channel_template).substitute(
         {
-            "atom_link": rss_url_prefix + channel + "-rss.xml",
+            "atom_link": RSS_URL_PREFIX + channel + "-rss.xml",
             "author": channel_meta["upper"]["name"],
             "title": channel_meta["title"],
             "description": channel_meta["title"],
