@@ -5,6 +5,7 @@ import asyncio
 import logging
 from string import Template
 from datetime import datetime
+from email.utils import formatdate
 from bilibili_api import channel_series, video as video_api
 import yt_dlp
 from xml_template import item_template, channel_template, feed_xml_template
@@ -15,7 +16,11 @@ newest_vides_first = False
 base_path = "bilibili-channel/"
 bilibili_link_prefix = "https://www.bilibili.com/video/"
 
-logging.basicConfig(filename="log", level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    filename="log",
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+)
 
 
 def full_path(path):
@@ -67,9 +72,10 @@ def load_channel_meta(channel):
     with open(file_path, "r", encoding="utf-8") as f:
         return json.load(f)
 
+
 async def aget_videos(pn):
     global newest_vides_first
-    if newest_vides_first :
+    if newest_vides_first:
         return await series.get_videos(pn=pn, sort=channel_series.ChannelOrder.CHANGE)
     return await series.get_videos(pn=pn)
 
@@ -149,7 +155,7 @@ def load_channel_video_meta(channel, bv):
 
 
 def timestamp_to_date(timestamp):
-    return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S")
+    return formatdate(timestamp, localtime=False, usegmt=True)
 
 
 def get_channel_bilibili_link(uid, sid):
@@ -172,7 +178,7 @@ def scan_channel_dir_to_generate_items_xml(channel):
     logging.info("===> start scan channel videos and generate item " + channel)
     items = []
     for video in load_channel_videos(channel):
-        bv = video['bvid']
+        bv = video["bvid"]
         if os.path.isdir(full_path(channel) + "/" + bv):
             video_meta = load_channel_video_meta(channel, bv)
             mp3 = full_path(channel) + "/" + bv + "/" + bv + ".mp3"
@@ -219,7 +225,7 @@ for channel in get_channel_list(load_config()):
     channel_meta = get_channel_meta(series)
     wirte_channel_meta(channel_path, channel_meta)
     logging.info("===> wirte channel meta done")
-    
+
 
 # 循环每个channel
 for channel in os.listdir(base_path):
@@ -253,6 +259,8 @@ for channel in os.listdir(base_path):
 
 # 根据已经下载的文件生成播客格式的xml
 for channel in os.listdir(base_path):
-    logging.info("===> start generate rss xml file by channel info channel id: " + channel )
+    logging.info(
+        "===> start generate rss xml file by channel info channel id: " + channel
+    )
     write_to_rss_xml(channel, generate_channel_xml(channel))
     logging.info("===> generate rss xml file by channel info done. ")
