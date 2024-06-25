@@ -10,7 +10,7 @@ import yt_dlp
 from xml_template import item_template, channel_template, feed_xml_template
 
 RSS_URL_PREFIX = ""
-NEWEST_VIDES_FIRST = 0
+NEWEST_VIDEOS_FIRST = 0
 FETCH_RECENT_N_VIDEOS = False
 base_path = "bilibili-channel/"
 bilibili_link_prefix = "https://www.bilibili.com/video/"
@@ -37,10 +37,10 @@ def load_global_config():
     logger.info(config)
     global RSS_URL_PREFIX
     global FETCH_RECENT_N_VIDEOS
-    global NEWEST_VIDES_FIRST
+    global NEWEST_VIDEOS_FIRST
     RSS_URL_PREFIX = config["RSS_URL_PREFIX"]
     FETCH_RECENT_N_VIDEOS = config["FETCH_RECENT_N_VIDEOS"]
-    NEWEST_VIDES_FIRST = config["NEWEST_VIDES_FIRST"]
+    NEWEST_VIDEOS_FIRST = config["NEWEST_VIDEOS_FIRST"]
 
 
 def get_channel_list(config):
@@ -74,7 +74,7 @@ def load_channel_meta(channel):
 
 
 async def aget_videos(pn):
-    if NEWEST_VIDES_FIRST:
+    if NEWEST_VIDEOS_FIRST:
         return await series.get_videos(pn=pn, sort=channel_series.ChannelOrder.CHANGE)
     return await series.get_videos(pn=pn)
 
@@ -186,6 +186,7 @@ def scan_channel_dir_to_generate_items_xml(channel):
                 {
                     "title": video_meta["title"],
                     "description": video_meta["desc"],
+                    'image': video_meta['pic'],
                     "url": RSS_URL_PREFIX + mp3,
                     "duration": video_meta["duration"],
                     "length": os.path.getsize(mp3),
