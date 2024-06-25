@@ -8,3 +8,5 @@
 - [ ] docker build
 - [ ] github action
 - [ ] support OSS upload
+- [ ] ai视频总结
+- [ ] 分P视频转换为podcast
