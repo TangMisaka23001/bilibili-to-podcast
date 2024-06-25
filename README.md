@@ -17,3 +17,6 @@ channel:
 - [ ] support OSS upload
 - [ ] ai视频总结
 - [ ] 分P视频转换为podcast
+
+## bilibili-api
+https://nemo2011.github.io/bilibili-api/#/
