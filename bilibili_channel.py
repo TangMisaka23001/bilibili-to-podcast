@@ -138,9 +138,14 @@ def download_audio(channel, bv):
     link = bilibili_link_prefix + str(bv)
     with yt_dlp.YoutubeDL(
         {
-            "extract_audio": True,
-            "format": "bestaudio",
-            "outtmpl": full_path(channel) + "/" + str(bv) + "/" + str(bv) + ".mp3",
+            "format": "bestaudio/best",
+            "postprocessors": [
+                {
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": "mp3",
+                }
+            ],
+            "outtmpl": full_path(channel) + "/" + str(bv) + "/" + str(bv),
         }
     ) as video:
         video.download(link)
@@ -186,7 +191,7 @@ def scan_channel_dir_to_generate_items_xml(channel):
                 {
                     "title": video_meta["title"],
                     "description": video_meta["desc"],
-                    'image': video_meta['pic'],
+                    "image": video_meta["pic"],
                     "url": RSS_URL_PREFIX + mp3,
                     "duration": video_meta["duration"],
                     "length": os.path.getsize(mp3),
