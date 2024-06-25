@@ -2,9 +2,8 @@ import yaml
 import os
 import json
 import asyncio
-import logging
+from logger import logger
 from string import Template
-from datetime import datetime
 from email.utils import formatdate
 from bilibili_api import channel_series, video as video_api
 import yt_dlp
@@ -15,12 +14,6 @@ NEWEST_VIDES_FIRST = 0
 FETCH_RECENT_N_VIDEOS = False
 base_path = "bilibili-channel/"
 bilibili_link_prefix = "https://www.bilibili.com/video/"
-
-logging.basicConfig(
-    filename="log",
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-)
 
 
 def full_path(path):
@@ -40,8 +33,8 @@ def load_config():
 
 def load_global_config():
     config = load_config()
-    logging.info("===> load config.yaml")
-    logging.info(config)
+    logger.info("===> load config.yaml")
+    logger.info(config)
     global RSS_URL_PREFIX
     global FETCH_RECENT_N_VIDEOS
     global NEWEST_VIDES_FIRST
@@ -174,15 +167,15 @@ def get_channel_bilibili_link(uid, sid):
 
 
 def write_to_rss_xml(channel, text):
-    path = 'rss/' + str(channel) + ".xml"
-    if not os.path.exists('rss'):
-        os.mkdir('rss')
+    path = "rss/" + str(channel) + ".xml"
+    if not os.path.exists("rss"):
+        os.mkdir("rss")
     with open(path, "w", encoding="utf-8") as f:
         f.write(text)
 
 
 def scan_channel_dir_to_generate_items_xml(channel):
-    logging.info("===> start scan channel videos and generate item " + channel)
+    logger.info("===> start scan channel videos and generate item " + channel)
     items = []
     for video in load_channel_videos(channel):
         bv = video["bvid"]
@@ -205,7 +198,7 @@ def scan_channel_dir_to_generate_items_xml(channel):
 
 
 def generate_channel_xml(channel):
-    logging.info("===> start generate channel xml")
+    logger.info("===> start generate channel xml")
     channel_meta = load_channel_meta(channel)
     channel_string = Template(channel_template).substitute(
         {
@@ -225,50 +218,50 @@ def generate_channel_xml(channel):
 load_global_config()
 # 加载配置文件并创建channel文件夹，下载元信息
 for channel in get_channel_list(load_config()):
-    logging.info("===> channel load " + str(channel))
+    logger.info("===> channel load " + str(channel))
     channel_path = channel["sid"]
     channel_mkdir(channel_path)
-    logging.info("===> start get channel series")
+    logger.info("===> start get channel series")
     series = get_channel_series(id=channel["sid"], uid=channel["uid"])
     channel_meta = get_channel_meta(series)
     wirte_channel_meta(channel_path, channel_meta)
-    logging.info("===> wirte channel meta done")
+    logger.info("===> wirte channel meta done")
 
 
 # 循环每个channel
 for channel in get_channel_sid_list(load_config()):
-    logging.info("===> start load channel meta and get videos meta list")
+    logger.info("===> start load channel meta and get videos meta list")
     channel_meta = load_channel_meta(channel)
     videos = asyncio.run(get_channel_videos(channel_meta=channel_meta))
     wirte_channel_videos(channel, videos)
-    logging.info("===> load channel meta and get videos meta list done")
+    logger.info("===> load channel meta and get videos meta list done")
 
 # 循环每个channel
 for channel in get_channel_sid_list(load_config()):
-    logging.info("===> start download channel videos meta and audio" + channel)
+    logger.info("===> start download channel videos meta and audio" + channel)
     videos = load_channel_videos(channel)
     for video in videos:
         bv = video["bvid"]
-        logging.info("===> start deal with BV: " + video["bvid"])
+        logger.info("===> start deal with BV: " + video["bvid"])
         # 判断如果存在complete文件则跳过
         if has_channel_video_complete(channel, bv):
-            logging.info("===> BV: " + bv + "exist. skip.............")
+            logger.info("===> BV: " + bv + "exist. skip.............")
             continue
         channel_videos_mkdir(channel, bv)
         # 写入每个视频的元信息
         video_info = asyncio.run(get_video_info(bv))
         del video_info["ugc_season"]
         wirte_channel_video_meta(channel=channel, bv=bv, text=video_info)
-        logging.info("===> get video meta data done. start download audio")
+        logger.info("===> get video meta data done. start download audio")
         download_audio(channel, bv)
-        logging.info("===> download audio done. BV: " + bv)
+        logger.info("===> download audio done. BV: " + bv)
         # 写入一个处理成功的标识
         wirte_channel_video_complete(channel, bv)
 
 # 根据已经下载的文件生成播客格式的xml
 for channel in get_channel_sid_list(load_config()):
-    logging.info(
+    logger.info(
         "===> start generate rss xml file by channel info channel id: " + channel
     )
     write_to_rss_xml(channel, generate_channel_xml(channel))
-    logging.info("===> generate rss xml file by channel info done. ")
+    logger.info("===> generate rss xml file by channel info done. ")

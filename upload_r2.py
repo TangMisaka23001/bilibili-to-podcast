@@ -1,7 +1,7 @@
 import os
 import boto3
 import yaml
-import logging
+from logger import logger
 from botocore.exceptions import NoCredentialsError, PartialCredentialsError, ClientError
 
 ACCESS_KEY = ''
@@ -9,11 +9,6 @@ SECRET_KEY = ''
 ENDPOINT_URL = ''
 BUCKET_NAME = 'bilibili-podcast-2'
 
-logging.basicConfig(
-    filename="log",
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-)
 
 def load_config():
     with open("config.yaml", "r") as f:
@@ -49,19 +44,19 @@ def upload_files(local_folder, bucket_name = BUCKET_NAME, check_exist = True):
             relative_path = os.path.relpath(local_path, local_folder)
             s3_path = local_folder + '/' + relative_path.replace(os.sep, '/')
             if check_exist and object_exists(s3_client, bucket_name, s3_path):
-                logging.info(f'===> file exist skip {s3_path}')
+                logger.info(f'===> file exist skip {s3_path}')
                 continue
             try:
                 s3_client.upload_file(local_path, bucket_name, s3_path)
-                logging.info(f'Successfully uploaded {s3_path}')
+                logger.info(f'===> Successfully uploaded {s3_path}')
             except FileNotFoundError:
-                logging.error(f'File not found: {local_path}')
+                logger.error(f'===> File not found: {local_path}')
             except NoCredentialsError:
-                logging.error('Credentials not available')
+                logger.error('===> Credentials not available')
             except PartialCredentialsError:
-                logging.error('Incomplete credentials provided')
+                logger.error('===> Incomplete credentials provided')
             except Exception as e:
-                logging.error(f'Failed to upload {s3_path}: {e}')
+                logger.error(f'===> Failed to upload {s3_path}: {e}')
       
 load_config()       
 upload_files(local_folder='bilibili-channel')
