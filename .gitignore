@@ -163,4 +163,4 @@ cython_debug/
 
 log
 bilibili-channel
-*-rss.xml
+rss

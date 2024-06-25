@@ -35,20 +35,27 @@ def channel_mkdir(channel):
 
 def load_config():
     with open("config.yaml", "r") as f:
-        config = yaml.safe_load(f)
-        logging.info("===> load config.yaml")
-        logging.info(config)
-        global RSS_URL_PREFIX
-        global FETCH_RECENT_N_VIDEOS
-        global NEWEST_VIDES_FIRST
-        RSS_URL_PREFIX = config["RSS_URL_PREFIX"]
-        FETCH_RECENT_N_VIDEOS = config["FETCH_RECENT_N_VIDEOS"]
-        NEWEST_VIDES_FIRST = config["NEWEST_VIDES_FIRST"]
-        return config
+        return yaml.safe_load(f)
+
+
+def load_global_config():
+    config = load_config()
+    logging.info("===> load config.yaml")
+    logging.info(config)
+    global RSS_URL_PREFIX
+    global FETCH_RECENT_N_VIDEOS
+    global NEWEST_VIDES_FIRST
+    RSS_URL_PREFIX = config["RSS_URL_PREFIX"]
+    FETCH_RECENT_N_VIDEOS = config["FETCH_RECENT_N_VIDEOS"]
+    NEWEST_VIDES_FIRST = config["NEWEST_VIDES_FIRST"]
 
 
 def get_channel_list(config):
     return config["channel"]
+
+
+def get_channel_sid_list(config):
+    return [str(channel["sid"]) for channel in get_channel_list(config)]
 
 
 def get_channel_series(id, uid):
@@ -167,7 +174,9 @@ def get_channel_bilibili_link(uid, sid):
 
 
 def write_to_rss_xml(channel, text):
-    path = base_path + str(channel) + "-rss.xml"
+    path = 'rss/' + str(channel) + ".xml"
+    if not os.path.exists('rss'):
+        os.mkdir('rss')
     with open(path, "w", encoding="utf-8") as f:
         f.write(text)
 
@@ -200,7 +209,7 @@ def generate_channel_xml(channel):
     channel_meta = load_channel_meta(channel)
     channel_string = Template(channel_template).substitute(
         {
-            "atom_link": RSS_URL_PREFIX + channel + "-rss.xml",
+            "atom_link": RSS_URL_PREFIX + "rss/" + channel + ".xml",
             "author": channel_meta["upper"]["name"],
             "title": channel_meta["title"],
             "description": channel_meta["title"],
@@ -213,6 +222,7 @@ def generate_channel_xml(channel):
     return Template(feed_xml_template).substitute({"channel": channel_string})
 
 
+load_global_config()
 # 加载配置文件并创建channel文件夹，下载元信息
 for channel in get_channel_list(load_config()):
     logging.info("===> channel load " + str(channel))
@@ -226,7 +236,7 @@ for channel in get_channel_list(load_config()):
 
 
 # 循环每个channel
-for channel in os.listdir(base_path):
+for channel in get_channel_sid_list(load_config()):
     logging.info("===> start load channel meta and get videos meta list")
     channel_meta = load_channel_meta(channel)
     videos = asyncio.run(get_channel_videos(channel_meta=channel_meta))
@@ -234,7 +244,7 @@ for channel in os.listdir(base_path):
     logging.info("===> load channel meta and get videos meta list done")
 
 # 循环每个channel
-for channel in os.listdir(base_path):
+for channel in get_channel_sid_list(load_config()):
     logging.info("===> start download channel videos meta and audio" + channel)
     videos = load_channel_videos(channel)
     for video in videos:
@@ -256,7 +266,7 @@ for channel in os.listdir(base_path):
         wirte_channel_video_complete(channel, bv)
 
 # 根据已经下载的文件生成播客格式的xml
-for channel in os.listdir(base_path):
+for channel in get_channel_sid_list(load_config()):
     logging.info(
         "===> start generate rss xml file by channel info channel id: " + channel
     )
