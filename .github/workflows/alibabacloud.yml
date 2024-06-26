@@ -31,10 +31,6 @@ env:
   IMAGE: bilibili-podcast
   TAG: ${{ github.sha }}
 
-
-permissions:
-  contents: read
-
 jobs:
   build:
     runs-on: ubuntu-latest
