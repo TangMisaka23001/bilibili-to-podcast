@@ -4,6 +4,7 @@ import json
 import asyncio
 from logger import logger
 from string import Template
+import requests
 from email.utils import formatdate
 from bilibili_api import channel_series, video as video_api
 import yt_dlp
@@ -12,6 +13,7 @@ from xml_template import item_template, channel_template, feed_xml_template
 RSS_URL_PREFIX = ""
 NEWEST_VIDEOS_FIRST = 0
 FETCH_RECENT_N_VIDEOS = False
+AUDIO_FORMAT = 'm4a'
 base_path = "bilibili-channel/"
 bilibili_link_prefix = "https://www.bilibili.com/video/"
 
@@ -138,17 +140,22 @@ def download_audio(channel, bv):
     link = bilibili_link_prefix + str(bv)
     with yt_dlp.YoutubeDL(
         {
-            "format": "bestaudio/best",
+            "format": "worstaudio/worst",
             "postprocessors": [
                 {
                     "key": "FFmpegExtractAudio",
-                    "preferredcodec": "mp3",
+                    "preferredcodec": AUDIO_FORMAT,
                 }
             ],
-            "outtmpl": full_path(channel) + "/" + str(bv) + "/" + str(bv),
+            "outtmpl": f'{full_path(channel)}/{str(bv)}/{str(bv)}',
         }
     ) as video:
         video.download(link)
+
+def download_picture(channel, bv, pic_link):
+    response = requests.get(pic_link, stream=True)
+    with open(f'{full_path(channel)}/{str(bv)}/pic.jpg', 'wb') as f:
+        f.write(response.content)
 
 
 def load_channel_video_meta(channel, bv):
@@ -186,15 +193,15 @@ def scan_channel_dir_to_generate_items_xml(channel):
         bv = video["bvid"]
         if os.path.isdir(full_path(channel) + "/" + bv):
             video_meta = load_channel_video_meta(channel, bv)
-            mp3 = full_path(channel) + "/" + bv + "/" + bv + ".mp3"
+            audio_path = f'{full_path(channel)}/{bv}/{bv}.{AUDIO_FORMAT}'
             item = Template(item_template).substitute(
                 {
                     "title": video_meta["title"],
                     "description": video_meta["desc"],
-                    "image": video_meta["pic"],
-                    "url": RSS_URL_PREFIX + mp3,
+                    "image": f'{RSS_URL_PREFIX}{full_path(channel)}/{str(bv)}/pic.jpg',
+                    "url": RSS_URL_PREFIX + audio_path,
                     "duration": video_meta["duration"],
-                    "length": os.path.getsize(mp3),
+                    "length": os.path.getsize(audio_path),
                     "link": bilibili_link_prefix + bv,
                     "date": timestamp_to_date(video_meta["pubdate"]),
                 }
@@ -260,6 +267,7 @@ for channel in get_channel_sid_list(load_config()):
         wirte_channel_video_meta(channel=channel, bv=bv, text=video_info)
         logger.info("===> get video meta data done. start download audio")
         download_audio(channel, bv)
+        download_picture(channel, bv, video_info['pic'])
         logger.info("===> download audio done. BV: " + bv)
         # 写入一个处理成功的标识
         wirte_channel_video_complete(channel, bv)
