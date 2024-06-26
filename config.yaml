@@ -1,14 +1,15 @@
-RSS_URL_PREFIX: https://pub-2ed1c81f567a462ebf4bddb12fb5ad6c.r2.dev/
-NEWEST_VIDES_FIRST: false
+RSS_URL_PREFIX: https://pub-f55b5ca1c4444a3f97c0fbee3d0eac67.r2.dev/
+NEWEST_VIDEOS_FIRST: false
 FETCH_RECENT_N_VIDEOS: 0
 channel:
   - uid: 391930545
     sid: 598034
-  - uid: 1571561781
-    sid: 2586487
+  # - uid: 1571561781
+  #   sid: 2586487
 
 # upload oss config
 R2:
   ACCESS_KEY: ''
   SECRET_KEY: ''
   ENDPOINT_URL: ''
+  BUCKET_NAME: bilibili-podcast
