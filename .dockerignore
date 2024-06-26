@@ -1,0 +1,5 @@
+bilibili-channel/
+__pycache__/
+rss/
+log
+.gitignore
