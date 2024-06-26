@@ -23,7 +23,7 @@ def full_path(path):
 def channel_mkdir(channel):
     path = full_path(channel)
     if not os.path.exists(path):
-        os.mkdir(path)
+        os.makedirs(path)
 
 
 def load_config():
