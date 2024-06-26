@@ -44,7 +44,17 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
 
-    # 1.1 Login to ACR
+    - name: Login to GitHub Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Build and push image to ACR
+      run: |
+        docker build --tag "$REGISTRY/$NAMESPACE/$IMAGE:$TAG" .
+
     - name: Login to ACR with the AccessKey pair
       uses: aliyun/acr-login@v1
       with:
@@ -52,8 +62,6 @@ jobs:
         username: "${{ secrets.ACCESS_KEY_ID }}"
         password: "${{ secrets.ACCESS_KEY_SECRET }}"
 
-    # 1.2 Build and push image to ACR
     - name: Build and push image to ACR
       run: |
-        docker build --tag "$REGISTRY/$NAMESPACE/$IMAGE:$TAG" .
         docker push "$REGISTRY/$NAMESPACE/$IMAGE:$TAG"

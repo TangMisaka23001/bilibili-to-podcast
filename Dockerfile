@@ -1,4 +1,4 @@
-FROM python:3.12
+FROM ghcr.io/python:3.12
 
 ADD . /app
 
