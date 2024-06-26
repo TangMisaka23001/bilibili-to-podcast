@@ -26,5 +26,5 @@ jobs:
 
     - name: Build and push image
       run: |
-        docker build --tag "$IMAGE:$TAG" .
+        docker build --tag "${{ secrets.DOCKERHUB_USERNAME }}/$IMAGE:$TAG" .
         docker push "${{ secrets.DOCKERHUB_USERNAME }}/$IMAGE:$TAG"
