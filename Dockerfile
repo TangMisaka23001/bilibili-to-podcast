@@ -4,7 +4,7 @@ ADD . /app
 
 WORKDIR /app
 
-RUN apt update && apt install ffmpeg && pip install -r requirements.txt
+RUN apt update && apt install -y ffmpeg && pip install -r requirements.txt
 
 EXPOSE 8000
 
