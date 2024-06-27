@@ -152,10 +152,10 @@ def download_audio(channel, bv):
     ) as video:
         video.download(link)
 
-def download_picture(channel, bv, pic_link):
-    response = requests.get(pic_link, stream=True)
-    with open(f'{full_path(channel)}/{str(bv)}/pic.jpg', 'wb') as f:
-        f.write(response.content)
+# def download_picture(channel, bv, pic_link):
+#     response = requests.get(pic_link, stream=True)
+#     with open(f'{full_path(channel)}/{str(bv)}/pic.jpg', 'wb') as f:
+#         f.write(response.content)
 
 
 def load_channel_video_meta(channel, bv):
@@ -197,8 +197,8 @@ def scan_channel_dir_to_generate_items_xml(channel):
             item = Template(item_template).substitute(
                 {
                     "title": video_meta["title"],
-                    "description": video_meta["desc"],
-                    "image": f'{RSS_URL_PREFIX}{full_path(channel)}/{str(bv)}/pic.jpg',
+                    "description": video_meta["desc"].replace("&", "&amp;"),
+                    "image": video_meta["pic"],
                     "url": RSS_URL_PREFIX + audio_path,
                     "duration": video_meta["duration"],
                     "length": os.path.getsize(audio_path),
@@ -215,7 +215,7 @@ def generate_channel_xml(channel):
     channel_meta = load_channel_meta(channel)
     channel_string = Template(channel_template).substitute(
         {
-            "atom_link": RSS_URL_PREFIX + "rss/" + channel + ".xml",
+            "atom_link": f'{RSS_URL_PREFIX}rss/{channel}.xml',
             "author": channel_meta["upper"]["name"],
             "title": channel_meta["title"],
             "description": channel_meta["title"],
@@ -267,7 +267,7 @@ for channel in get_channel_sid_list(load_config()):
         wirte_channel_video_meta(channel=channel, bv=bv, text=video_info)
         logger.info("===> get video meta data done. start download audio")
         download_audio(channel, bv)
-        download_picture(channel, bv, video_info['pic'])
+        # download_picture(channel, bv, video_info['pic'])
         logger.info("===> download audio done. BV: " + bv)
         # 写入一个处理成功的标识
         wirte_channel_video_complete(channel, bv)
