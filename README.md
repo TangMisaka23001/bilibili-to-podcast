@@ -12,6 +12,11 @@ channel:
 ```
 
 ## TODO
+- [ ] 文件操作封装，支持本地和OSS
+- [ ] 支持2种合集类型
+- [ ] 支持vervel部署
+- [ ] 支持up主全投稿视频
+- [ ] 支持使用流式接口替代文件访问形式
 - [ ] docker build
 - [ ] github action
 - [ ] support OSS upload
