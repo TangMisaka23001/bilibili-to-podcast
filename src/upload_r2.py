@@ -1,27 +1,8 @@
 import os
 import boto3
-import yaml
 from logger import logger
 from botocore.exceptions import NoCredentialsError, PartialCredentialsError, ClientError
-
-ACCESS_KEY = ""
-SECRET_KEY = ""
-ENDPOINT_URL = ""
-BUCKET_NAME = ""
-
-
-def load_config():
-    with open("config.yaml", "r") as f:
-        config = yaml.safe_load(f)
-        global ACCESS_KEY
-        global SECRET_KEY
-        global ENDPOINT_URL
-        global BUCKET_NAME
-        ACCESS_KEY = config["R2"]["ACCESS_KEY"]
-        SECRET_KEY = config["R2"]["SECRET_KEY"]
-        ENDPOINT_URL = config["R2"]["ENDPOINT_URL"]
-        BUCKET_NAME = config["R2"]["BUCKET_NAME"]
-
+from config import BUCKET_NAME, ACCESS_KEY, SECRET_KEY, ENDPOINT_URL
 
 def object_exists(s3_client, bucket_name, object_key):
     try:
@@ -46,7 +27,7 @@ def upload_files(local_folder, bucket_name=BUCKET_NAME, check_exist=True):
         for file in files:
             local_path = os.path.join(root, file)
             relative_path = os.path.relpath(local_path, local_folder)
-            s3_path = local_folder + "/" + relative_path.replace(os.sep, "/")
+            s3_path = local_folder.replace("../output/", "") + "/" + relative_path.replace(os.sep, "/")
             if check_exist and object_exists(s3_client, bucket_name, s3_path):
                 logger.info(f"===> file exist skip {s3_path}")
                 continue
@@ -63,6 +44,7 @@ def upload_files(local_folder, bucket_name=BUCKET_NAME, check_exist=True):
                 logger.error(f"===> Failed to upload {s3_path}: {e}")
 
 
-load_config()
-upload_files(local_folder="bilibili-channel", bucket_name=BUCKET_NAME)
-upload_files(local_folder="rss", bucket_name=BUCKET_NAME, check_exist=False)
+upload_files(local_folder="../output/rss", bucket_name=BUCKET_NAME, check_exist=False)
+upload_files(local_folder="../output/bilibili-season", bucket_name=BUCKET_NAME)
+# upload_files(local_folder="../output/bilibili-series", bucket_name=BUCKET_NAME)
+
