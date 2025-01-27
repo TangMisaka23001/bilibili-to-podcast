@@ -1,10 +1,20 @@
 import os
 import boto3
+import json
 from logger import logger
 from botocore.exceptions import NoCredentialsError, PartialCredentialsError, ClientError
 from config import BUCKET_NAME, ACCESS_KEY, SECRET_KEY, ENDPOINT_URL
 
-def object_exists(s3_client, bucket_name, object_key):
+
+s3_client = boto3.session.Session().client(
+    service_name="s3",
+    aws_access_key_id=ACCESS_KEY,
+    aws_secret_access_key=SECRET_KEY,
+    endpoint_url=ENDPOINT_URL,
+)
+
+
+def object_exists(object_key, bucket_name=BUCKET_NAME):
     try:
         s3_client.head_object(Bucket=bucket_name, Key=object_key)
     except ClientError as e:
@@ -15,20 +25,26 @@ def object_exists(s3_client, bucket_name, object_key):
     return True
 
 
+def get_object(object_key, bucket_name=BUCKET_NAME):
+    try:
+        # 从 S3 读取文件
+        response = s3_client.get_object(Bucket=bucket_name, Key=object_key)
+        # 从响应中获取文件内容
+        file_content = response['Body'].read().decode('utf-8')
+        # 解析为 JSON
+        return json.loads(file_content)
+    except Exception as e:
+        print(f"Error reading or parsing the file: {e}")
+
+
 def upload_files(local_folder, bucket_name=BUCKET_NAME, check_exist=True):
-    session = boto3.session.Session()
-    s3_client = session.client(
-        service_name="s3",
-        aws_access_key_id=ACCESS_KEY,
-        aws_secret_access_key=SECRET_KEY,
-        endpoint_url=ENDPOINT_URL,
-    )
     for root, _, files in os.walk(local_folder):
         for file in files:
             local_path = os.path.join(root, file)
             relative_path = os.path.relpath(local_path, local_folder)
-            s3_path = local_folder.replace("../output/", "") + "/" + relative_path.replace(os.sep, "/")
-            if check_exist and object_exists(s3_client, bucket_name, s3_path):
+            s3_path = local_folder.replace(
+                "../output/", "") + "/" + relative_path.replace(os.sep, "/")
+            if "videos.json" not in s3_path and check_exist and object_exists(s3_path):
                 logger.info(f"===> file exist skip {s3_path}")
                 continue
             try:
@@ -44,7 +60,9 @@ def upload_files(local_folder, bucket_name=BUCKET_NAME, check_exist=True):
                 logger.error(f"===> Failed to upload {s3_path}: {e}")
 
 
-upload_files(local_folder="../output/rss", bucket_name=BUCKET_NAME, check_exist=False)
-upload_files(local_folder="../output/bilibili-season", bucket_name=BUCKET_NAME)
-# upload_files(local_folder="../output/bilibili-series", bucket_name=BUCKET_NAME)
-
+if __name__ == "__main__":
+    upload_files(local_folder="../output/rss",
+                 bucket_name=BUCKET_NAME, check_exist=False)
+    upload_files(local_folder="../output/bilibili-season",
+                 bucket_name=BUCKET_NAME)
+    # upload_files(local_folder="../output/bilibili-series", bucket_name=BUCKET_NAME)

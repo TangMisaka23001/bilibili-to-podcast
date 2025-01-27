@@ -53,17 +53,14 @@ def load_channel_meta(channel):
         return json.load(f)
 
 
-async def aget_videos(pn):
-    return await series.get_videos(pn=pn, sort=channel_series.ChannelOrder.DEFAULT)
-
-
 async def get_channel_videos(channel_meta):
-    series = get_channel_series(id=channel_meta["series_id"], uid=channel_meta["mid"])
+    series = get_channel_series(
+        id=channel_meta["series_id"], uid=channel_meta["mid"])
     # 合集有分页，这里需要解开分页返回全部视频信息
     pn = 1
     result = []
     while True:
-        page_videos = await series.get_videos(pn=pn)
+        page_videos = await series.get_videos(sort=channel_series.ChannelOrder.CHANGE, pn=pn)
         result += page_videos["archives"]
         if len(result) >= channel_meta["total"]:
             break

@@ -2,12 +2,14 @@ import os
 import json
 import asyncio
 from logger import logger
-from bilibili_api import channel_series, video as video_api
+from bilibili_api import video as video_api
+from bilibili_api.channel_series import ChannelOrder, ChannelSeriesType, ChannelSeries
 from bilibili_audio_download import download_channel_audio as download_audio, download_channel_picture as download_picture
 from config import (
     config,
     season_base_path,
 )
+from file import has_season_video_complete
 
 
 def full_path(path):
@@ -29,8 +31,8 @@ def get_channel_sid_list():
 
 
 def get_channel_series(id, uid):
-    return channel_series.ChannelSeries(
-        id_=id, uid=uid, type_=channel_series.ChannelSeriesType.SEASON
+    return ChannelSeries(
+        id_=id, uid=uid, type_=ChannelSeriesType.SEASON
     )
 
 
@@ -50,17 +52,14 @@ def load_channel_meta(channel):
         return json.load(f)
 
 
-async def aget_videos(pn):
-    return await series.get_videos(pn=pn, sort=channel_series.ChannelOrder.DEFAULT)
-
-
 async def get_channel_videos(channel_meta):
     series = get_channel_series(id=channel_meta["id"], uid=channel_meta["mid"])
     # 合集有分页，这里需要解开分页返回全部视频信息
     pn = 1
     result = []
     while True:
-        page_videos = await series.get_videos(pn=pn)
+        # page_videos = await series.get_videos(sort=ChannelOrder.CHANGE, pn=pn)
+        page_videos = await series.get_videos(sort=ChannelOrder.DEFAULT, pn=pn)
         result += page_videos["archives"]
         if len(result) >= channel_meta["media_count"]:
             break
@@ -134,8 +133,12 @@ for channel in get_channel_sid_list():
     for video in videos:
         bv = video["bvid"]
         logger.info("===> start deal with BV: " + video["bvid"])
+        # # 判断如果存在complete文件则跳过
+        # if has_channel_video_complete(channel, bv):
+        #     logger.info("===> BV: " + bv + "exist. skip.............")
+        #     continue
         # 判断如果存在complete文件则跳过
-        if has_channel_video_complete(channel, bv):
+        if has_season_video_complete(channel, bv):
             logger.info("===> BV: " + bv + "exist. skip.............")
             continue
         channel_videos_mkdir(channel, bv)

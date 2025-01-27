@@ -14,7 +14,7 @@ from config import (
     series_rss_path,
     season_rss_path,
 )
-
+from file import load_season_videos, load_season_video_meta
 
 def get_channel_sid_list():
     return [str(channel["sid"]) for channel in load_config()["season"]]
@@ -75,24 +75,25 @@ def timestamp_to_date(timestamp):
 def scan_channel_dir_to_generate_items_xml(channel):
     logger.info("===> start scan channel videos and generate item " + channel)
     items = []
-    for video in load_channel_videos(channel):
+    for video in load_season_videos(channel):
         bv = video["bvid"]
-        if os.path.isdir(season_base_path + str(channel) + "/" + bv):
-            video_meta = load_channel_video_meta(channel, bv)
-            audio_path = f"{season_rss_path + str(channel)}/{bv}/{bv}.{AUDIO_FORMAT}"
-            item = Template(item_template).substitute(
-                {
-                    "title": video_meta["title"],
-                    "description": video_meta["desc"].replace("&", "&amp;"),
-                    "image": video_meta["pic"],
-                    "url": RSS_URL_PREFIX + audio_path,
-                    "duration": video_meta["duration"],
-                    "length": os.path.getsize("../output/" + audio_path),
-                    "link": bilibili_link_prefix + bv,
-                    "date": timestamp_to_date(video_meta["pubdate"]),
-                }
-            )
-            items.append(item)
+        #if os.path.isdir(season_base_path + str(channel) + "/" + bv):
+        video_meta = load_season_video_meta(channel, bv)
+        audio_path = f"{season_rss_path + str(channel)}/{bv}/{bv}.{AUDIO_FORMAT}"
+        item = Template(item_template).substitute(
+            {
+                "title": video_meta["title"],
+                "description": video_meta["desc"].replace("&", "&amp;"),
+                "image": video_meta["pic"],
+                "url": RSS_URL_PREFIX + audio_path,
+                "duration": video_meta["duration"],
+                # "length": os.path.getsize("../output/" + audio_path),
+                "length": 0,
+                "link": bilibili_link_prefix + bv,
+                "date": timestamp_to_date(video_meta["pubdate"]),
+            }
+        )
+        items.append(item)
     return items
 
 
@@ -173,9 +174,9 @@ for channel in get_channel_sid_list():
     write_to_rss_xml("season", channel, generate_channel_xml(channel))
     logger.info("===> generate rss xml file by channel info done. ")
 
-for series in get_series_sid_list():
-    logger.info(
-        "===> start generate rss xml file by channel info channel id: " + series
-    )
-    write_to_rss_xml("series", series, generate_series_xml(series))
-    logger.info("===> generate rss xml file by series info done. ")
+# for series in get_series_sid_list():
+#     logger.info(
+#         "===> start generate rss xml file by channel info channel id: " + series
+#     )
+#     write_to_rss_xml("series", series, generate_series_xml(series))
+#     logger.info("===> generate rss xml file by series info done. ")
