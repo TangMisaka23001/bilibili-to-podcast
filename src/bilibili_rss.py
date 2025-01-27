@@ -37,23 +37,11 @@ def load_series_meta(series):
 
 
 def get_channel_bilibili_link(uid, sid):
-    return (
-        "https://space.bilibili.com/"
-        + str(uid)
-        + "/channel/collectiondetail?sid="
-        + str(sid)
-        + "&amp;ctype=0"
-    )
+    return (f"https://space.bilibili.com/{str(uid)}/lists/{str(sid)}?type=season")
 
 
 def get_series_bilibili_link(uid, sid):
-    return (
-        "https://space.bilibili.com/"
-        + str(uid)
-        + "/channel/collectiondetail?sid="
-        + str(sid)
-        + "&amp;type=series"
-    )
+    return (f"https://space.bilibili.com/{str(uid)}/lists/{str(sid)}?type=series")
 
 
 def load_channel_videos(channel):

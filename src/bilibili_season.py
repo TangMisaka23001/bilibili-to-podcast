@@ -35,7 +35,7 @@ def get_channel_series(id, uid):
 
 
 def get_channel_meta(series):
-    return series.get_meta()
+    return asyncio.run(series.get_meta())
 
 
 def wirte_channel_meta(channel, text):

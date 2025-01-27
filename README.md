@@ -25,3 +25,7 @@ channel:
 
 ## bilibili-api
 https://nemo2011.github.io/bilibili-api/#/
+
+```
+pip3 install git+https://github.com/Nemo2011/bilibili-api.git@dev
+```

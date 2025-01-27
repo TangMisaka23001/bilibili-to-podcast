@@ -10,7 +10,7 @@ channel_template = """<channel>
 <atom:link href="$atom_link" rel="self" type="application/rss+xml" />
 <title>$title</title>
 <description>$description</description>
-<link>$link/</link>
+<link>$link</link>
 <language>zh-cn</language>
 <itunes:author>$author</itunes:author>
 <itunes:category text="$category" />
