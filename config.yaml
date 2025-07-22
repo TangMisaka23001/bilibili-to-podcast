@@ -1,21 +1,20 @@
 PORT: 8000
-RSS_URL_PREFIX: https://podcast.bin-worker.tech/
+RSS_URL_PREFIX: https://podcast.oxcafebabe.work/
 FETCH_RECENT_N_VIDEOS: 0
 season:
   - uid: 391930545
     sid: 598034
-  # - uid: 47782841
-  #   sid: 1164952
-  # - uid: 4698846
-  #   sid: 534424
+  - uid: 299133172
+    sid: 48036
+  - uid: 27492426
+    sid: 5852853
 
 # series:
-#   - uid: 3546729368520811
+#   - uid: 3546729368520811 
 #     sid: 4281748
 
 # upload oss config
 R2:
-  ACCESS_KEY: ''
-  SECRET_KEY: ''
+
   ENDPOINT_URL: https://fdf8902a4669a3a852835af37cceded7.r2.cloudflarestorage.com
   BUCKET_NAME: bilibili-podcast
