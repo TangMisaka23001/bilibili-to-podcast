@@ -17,7 +17,7 @@ series:
 
 # upload oss config
 R2:
-  ACCESS_KEY: ''
-  SECRET_KEY: ''
+  ACCESS_KEY: bd41e2ae286402bc1dcfd0be624dd33e
+  SECRET_KEY: 899b7fcf19d68a8363c72d71e5e89e6de79b55fcb69011280441bc8aa03df440
   ENDPOINT_URL: https://fdf8902a4669a3a852835af37cceded7.r2.cloudflarestorage.com
   BUCKET_NAME: bilibili-podcast

@@ -61,8 +61,6 @@ def upload_files(local_folder, bucket_name=BUCKET_NAME, check_exist=True):
 
 
 if __name__ == "__main__":
-    upload_files(local_folder="../output/rss",
-                 bucket_name=BUCKET_NAME, check_exist=False)
-    upload_files(local_folder="../output/bilibili-season",
-                 bucket_name=BUCKET_NAME)
-    # upload_files(local_folder="../output/bilibili-series", bucket_name=BUCKET_NAME)
+    upload_files(local_folder="../output/rss", bucket_name=BUCKET_NAME, check_exist=False)
+    upload_files(local_folder="../output/bilibili-season", bucket_name=BUCKET_NAME)
+    upload_files(local_folder="../output/bilibili-series", bucket_name=BUCKET_NAME)

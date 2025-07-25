@@ -174,9 +174,9 @@ for channel in get_channel_sid_list():
     write_to_rss_xml("season", channel, generate_channel_xml(channel))
     logger.info("===> generate rss xml file by channel info done. ")
 
-# for series in get_series_sid_list():
-#     logger.info(
-#         "===> start generate rss xml file by channel info channel id: " + series
-#     )
-#     write_to_rss_xml("series", series, generate_series_xml(series))
-#     logger.info("===> generate rss xml file by series info done. ")
+for series in get_series_sid_list():
+    logger.info(
+        "===> start generate rss xml file by channel info channel id: " + series
+    )
+    write_to_rss_xml("series", series, generate_series_xml(series))
+    logger.info("===> generate rss xml file by series info done. ")
