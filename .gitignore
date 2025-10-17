@@ -166,4 +166,5 @@ output/
 
 config.yaml
 
-temp
+config.yaml
+src/cookie
