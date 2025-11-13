@@ -1,6 +1,6 @@
-bilibili_api_python==16.2.0
+#bilibili_api_python==16.2.0
 boto3==1.34.132
 botocore==1.34.132
 PyYAML==6.0.1
-yt_dlp==2024.5.27
+yt_dlp==2025.10.22
 schedule==1.2.2

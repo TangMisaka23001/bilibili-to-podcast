@@ -14,6 +14,7 @@ def download_channel_audio(channel, bv):
                 }
             ],
             "outtmpl": f'{season_base_path + str(channel)}/{str(bv)}/{str(bv)}',
+            "cookiefile": "cookie"
         }
     ) as video:
         video.download(link)
