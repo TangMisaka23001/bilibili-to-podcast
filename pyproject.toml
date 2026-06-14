@@ -27,6 +27,7 @@ b2p-prune = "bilibili_podcast.cli.prune:main"
 b2p-sync  = "bilibili_podcast.cli.sync:main"
 b2p-fetch = "bilibili_podcast.cli.fetch:main"
 b2p-rss   = "bilibili_podcast.cli.rss_cmd:main"
+b2p-gen-index = "bilibili_podcast.cli.gen_index:main"
 b2p-cron  = "bilibili_podcast.cli.cron:main"
 
 [tool.setuptools.packages.find]
