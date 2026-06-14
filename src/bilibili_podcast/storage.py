@@ -13,7 +13,9 @@ from dataclasses import dataclass, field
 import boto3
 from botocore.exceptions import ClientError
 
-from logger import logger
+from bilibili_podcast.logger import get_logger
+
+logger = get_logger()
 
 
 @dataclass
@@ -97,7 +99,7 @@ _LAZY_CLIENT = None
 def _default_client():
     global _LAZY_CLIENT
     if _LAZY_CLIENT is None:
-        from config import ACCESS_KEY, ENDPOINT_URL, SECRET_KEY
+        from bilibili_podcast.config import ACCESS_KEY, ENDPOINT_URL, SECRET_KEY
         _LAZY_CLIENT = make_s3_client(ACCESS_KEY, SECRET_KEY, ENDPOINT_URL)
     return _LAZY_CLIENT
 
@@ -120,7 +122,7 @@ def get_object(object_key: str, bucket_name: str):
 
 
 if __name__ == "__main__":
-    from config import BUCKET_NAME
+    from bilibili_podcast.config import BUCKET_NAME
     client = _default_client()
     result = sync("../output/", BUCKET_NAME, client)
     logger.info(

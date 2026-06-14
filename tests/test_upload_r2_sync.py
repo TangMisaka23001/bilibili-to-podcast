@@ -4,7 +4,7 @@ import boto3
 import pytest
 from moto import mock_aws
 
-from src.upload_r2 import sync
+from bilibili_podcast.storage import sync
 
 
 @pytest.fixture
