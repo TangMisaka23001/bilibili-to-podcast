@@ -63,7 +63,7 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default="config.yaml")
-    parser.add_argument("--output-root", default="../output/")
+    parser.add_argument("--output-root", default="output")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
 

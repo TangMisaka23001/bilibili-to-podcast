@@ -23,8 +23,8 @@ PORT = 8000
 config = {}
 
 bilibili_link_prefix = "https://www.bilibili.com/video/"
-series_base_path = "../output/bilibili-series/"
-season_base_path = "../output/bilibili-season/"
+series_base_path = "output/bilibili-series/"
+season_base_path = "output/bilibili-season/"
 series_rss_path = "bilibili-series/"
 season_rss_path = "bilibili-season/"
 

@@ -124,7 +124,7 @@ def get_object(object_key: str, bucket_name: str):
 if __name__ == "__main__":
     from bilibili_podcast.config import BUCKET_NAME
     client = _default_client()
-    result = sync("../output/", BUCKET_NAME, client)
+    result = sync("output", BUCKET_NAME, client)
     logger.info(
         f"===> sync done: uploaded={len(result.uploaded)} "
         f"deleted={len(result.deleted)} skipped={len(result.skipped)}"
