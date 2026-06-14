@@ -16,8 +16,11 @@ def main(argv: list[str] | None = None) -> int:
 
     config = load_active_config(args.config)
     refs = [
-        ChannelRef(type=ChannelType(t["type"]), uid=t["uid"], sid=t["sid"])
-        for t in config["season"] + config["series"]
+        ChannelRef(type=ChannelType.SEASON, uid=c["uid"], sid=c["sid"])
+        for c in config["season"]
+    ] + [
+        ChannelRef(type=ChannelType.SERIES, uid=c["uid"], sid=c["sid"])
+        for c in config["series"]
     ]
     fetch_all(refs, output_root=Path(args.output_root))
     return 0
