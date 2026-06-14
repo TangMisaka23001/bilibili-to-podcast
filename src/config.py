@@ -1,5 +1,12 @@
+"""Global config: load ../config.yaml once at module import.
+
+Read top-level scalars (`RSS_URL_PREFIX`, `PORT`, `R2.*`) into module-level
+variables. The active `season` / `series` collection lists are resolved by
+src.tools.config_loader so both legacy and `sources:` configs work.
+"""
 from logger import logger
-import yaml
+from src.tools.config_loader import load_active_config
+
 
 RSS_URL_PREFIX = ""
 AUDIO_FORMAT = 'm4a'
@@ -16,30 +23,19 @@ season_base_path = "../output/bilibili-season/"
 series_rss_path = "bilibili-series/"
 season_rss_path = "bilibili-season/"
 
-def load_config():
-    with open("../config.yaml", "r") as f:
-        return yaml.safe_load(f)
 
-
-def load_global_config():
-    global config
-    config = load_config()
+def _load_global_config():
+    global config, RSS_URL_PREFIX, ACCESS_KEY, SECRET_KEY, ENDPOINT_URL, BUCKET_NAME, PORT
+    config = load_active_config("../config.yaml")
     logger.info("===> load config.yaml")
     logger.info(config)
-    global RSS_URL_PREFIX
-    global FETCH_RECENT_N_VIDEOS
-    RSS_URL_PREFIX = config["RSS_URL_PREFIX"]
-    
-    global ACCESS_KEY
-    global SECRET_KEY
-    global ENDPOINT_URL
-    global BUCKET_NAME
-    ACCESS_KEY = config["R2"]["ACCESS_KEY"]
-    SECRET_KEY = config["R2"]["SECRET_KEY"]
-    ENDPOINT_URL = config["R2"]["ENDPOINT_URL"]
-    BUCKET_NAME = config["R2"]["BUCKET_NAME"]
+    RSS_URL_PREFIX = config.get("RSS_URL_PREFIX", "")
+    r2 = config.get("R2", {}) or {}
+    ACCESS_KEY = r2.get("ACCESS_KEY", "")
+    SECRET_KEY = r2.get("SECRET_KEY", "")
+    ENDPOINT_URL = r2.get("ENDPOINT_URL", "")
+    BUCKET_NAME = r2.get("BUCKET_NAME", "")
+    PORT = config.get("PORT", 8000)
 
-    global PORT
-    PORT = config["PORT"]
-    
-load_global_config()
+
+_load_global_config()

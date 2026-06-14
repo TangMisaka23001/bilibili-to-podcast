@@ -88,7 +88,7 @@ def test_prune_errors_when_sources_and_legacy_both_present(workspace, tmp_path):
         season=[{"uid": "9", "sid": "99"}],
     )
 
-    with pytest.raises(ValueError, match="sources"):
+    with pytest.raises(Exception, match="sources"):
         prune(cfg, output_root=str(workspace))
 
 

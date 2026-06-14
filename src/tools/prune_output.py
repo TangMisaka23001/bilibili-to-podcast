@@ -1,9 +1,9 @@
 """Prune stale collection directories from output/ before each pipeline run.
 
 A "collection directory" is `output/bilibili-{season|series}/{sid}/`. After
-loading the active collection list from config (legacy `season`/`series` keys
-or the newer `sources:` URLs that get resolved via the URL extractor), any
-collection directory whose sid is NOT in that active list is removed.
+loading the active collection list from config (via config_loader, which
+handles both legacy `season`/`series` keys and the newer `sources:` URLs),
+any collection directory whose sid is NOT in that active list is removed.
 """
 from __future__ import annotations
 
@@ -11,34 +11,13 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import yaml
-
-from src.tools.extract_url import parse_sources, to_legacy_config
+from src.tools.config_loader import ConfigError, load_active_config
 
 
 @dataclass
 class PruneResult:
     deleted_season: list[str] = field(default_factory=list)
     deleted_series: list[str] = field(default_factory=list)
-
-
-def _active_sids(config: dict) -> tuple[set[str], set[str]]:
-    sources = config.get("sources")
-    has_legacy = "season" in config or "series" in config
-
-    if sources is not None and has_legacy:
-        raise ValueError(
-            "config defines both 'sources' and 'season'/'series'; use one or the other"
-        )
-
-    if sources is not None:
-        legacy = to_legacy_config(parse_sources(sources))
-        season_cfg, series_cfg = legacy["season"], legacy["series"]
-    else:
-        season_cfg = config.get("season", []) or []
-        series_cfg = config.get("series", []) or []
-
-    return {str(c["sid"]) for c in season_cfg}, {str(c["sid"]) for c in series_cfg}
 
 
 def _scan(output_root: Path, kind: str, keep: set[str]) -> tuple[list[str], list[Path]]:
@@ -55,22 +34,27 @@ def _scan(output_root: Path, kind: str, keep: set[str]) -> tuple[list[str], list
     return names, paths
 
 
-def prune(config_path: Path | str, output_root: str | Path = "../output/") -> PruneResult:
-    config_path = Path(config_path)
-    with config_path.open("r", encoding="utf-8") as f:
-        config = yaml.safe_load(f) or {}
+def _sids(config: dict) -> tuple[set[str], set[str]]:
+    return (
+        {str(c["sid"]) for c in config.get("season", [])},
+        {str(c["sid"]) for c in config.get("series", [])},
+    )
 
-    season_sids, series_sids = _active_sids(config)
-    root = Path(output_root)
 
-    season_names, season_paths = _scan(root, "season", season_sids)
-    series_names, series_paths = _scan(root, "series", series_sids)
-
+def _do_prune(output_root: Path, season_sids: set[str], series_sids: set[str]) -> tuple[list[str], list[str]]:
+    season_names, season_paths = _scan(output_root, "season", season_sids)
+    series_names, series_paths = _scan(output_root, "series", series_sids)
     for p in season_paths:
         shutil.rmtree(p)
     for p in series_paths:
         shutil.rmtree(p)
+    return season_names, series_names
 
+
+def prune(config_path: Path | str, output_root: str | Path = "../output/") -> PruneResult:
+    config = load_active_config(config_path)
+    season_sids, series_sids = _sids(config)
+    season_names, series_names = _do_prune(Path(output_root), season_sids, series_sids)
     return PruneResult(deleted_season=season_names, deleted_series=series_names)
 
 
@@ -83,13 +67,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
 
-    config_path = Path(args.config)
-    with config_path.open("r", encoding="utf-8") as f:
-        config = yaml.safe_load(f) or {}
-    season_sids, series_sids = _active_sids(config)
-    root = Path(args.output_root)
-    season_names, season_paths = _scan(root, "season", season_sids)
-    series_names, series_paths = _scan(root, "series", series_sids)
+    try:
+        config = load_active_config(args.config)
+    except ConfigError as e:
+        print(f"error: {e}")
+        return 1
+
+    season_sids, series_sids = _sids(config)
+    season_names, season_paths = _scan(Path(args.output_root), "season", season_sids)
+    series_names, series_paths = _scan(Path(args.output_root), "series", series_sids)
 
     if args.dry_run:
         print(f"would delete (season): {season_names}")
