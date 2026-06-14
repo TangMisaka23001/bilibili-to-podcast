@@ -66,6 +66,16 @@ def _timestamp_to_date(timestamp: float) -> str:
     return formatdate(timestamp, localtime=False, usegmt=True)
 
 
+def _xml_escape(text: str) -> str:
+    return (
+        text.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace('"', "&quot;")
+            .replace("'", "&apos;")
+    )
+
+
 def _scan_channel_items(channel: str) -> list[str]:
     items = []
     for video in _load_season_videos(channel):
@@ -75,9 +85,9 @@ def _scan_channel_items(channel: str) -> list[str]:
         items.append(
             Template(item_template).substitute(
                 {
-                    "title": video_meta["title"],
-                    "description": video_meta["desc"].replace("&", "&amp;"),
-                    "image": video_meta["pic"],
+                    "title": _xml_escape(video_meta["title"]),
+                    "description": _xml_escape(video_meta["desc"]),
+                    "image": _xml_escape(video_meta["pic"]),
                     "url": RSS_URL_PREFIX + audio_path,
                     "duration": video_meta["duration"],
                     "length": 0,
@@ -103,9 +113,9 @@ def _scan_series_items(series: str) -> list[str]:
         items.append(
             Template(item_template).substitute(
                 {
-                    "title": video_meta["title"],
-                    "description": video_meta["desc"].replace("&", "&amp;"),
-                    "image": video_meta["pic"],
+                    "title": _xml_escape(video_meta["title"]),
+                    "description": _xml_escape(video_meta["desc"]),
+                    "image": _xml_escape(video_meta["pic"]),
                     "url": RSS_URL_PREFIX + audio_path,
                     "duration": video_meta["duration"],
                     "length": length,
@@ -123,11 +133,11 @@ def _channel_xml(channel: str) -> str:
         {
             "atom_link": f"{RSS_URL_PREFIX}rss/{channel}.xml",
             "author": meta["upper"]["name"],
-            "title": meta["title"],
-            "description": meta["title"],
+            "title": _xml_escape(meta["title"]),
+            "description": _xml_escape(meta["title"]),
             "link": _channel_bilibili_link(meta["mid"], meta["id"]),
             "category": "",
-            "image": meta["cover"],
+            "image": _xml_escape(meta["cover"]),
             "items": "\n".join(_scan_channel_items(channel)),
         }
     )
@@ -140,7 +150,7 @@ def _series_xml(series: str) -> str:
         {
             "atom_link": f"{RSS_URL_PREFIX}rss/{series}.xml",
             "author": meta["name"],
-            "title": meta["name"],
+            "title": _xml_escape(meta["name"]),
             "description": meta["description"],
             "link": _series_bilibili_link(meta["mid"], meta["series_id"]),
             "category": "",

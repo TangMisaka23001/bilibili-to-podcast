@@ -83,6 +83,11 @@ def test_timestamp_to_date():
     assert "GMT" in result
 
 
+def test_xml_escape_handles_all_five_entities():
+    assert rss._xml_escape("a & b < c > d \" e ' f") == \
+        "a &amp; b &lt; c &gt; d &quot; e &apos; f"
+
+
 # --- generate season ---
 
 def test_generate_season_creates_rss_xml(monkeypatch, tmp_path: Path):
@@ -112,7 +117,7 @@ def test_generate_season_creates_rss_xml(monkeypatch, tmp_path: Path):
     assert 'enclosure url="https://podcast.example.com/season/598034/BV1aa/BV1aa.m4a"' in xml
     assert "<itunes:duration>123</itunes:duration>" in xml
     # & -> &amp;, < > stay literal in XML text
-    assert "<description>简介 <>&amp;</description>" in xml
+    assert "<description>简介 &lt;&gt;&amp;</description>" in xml
 
 
 # --- generate series ---
