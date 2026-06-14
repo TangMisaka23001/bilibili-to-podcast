@@ -1,5 +1,15 @@
-"""b2p-gen-index: generate docs/index.html from config sources."""
 from __future__ import annotations
+
+"""b2p-gen-index: generate docs/index.html from config sources."""
+
+_IMAGE_PROXY = "https://images.weserv.nl/?url="
+
+
+def _proxy_cover(url: str) -> str:
+    """Rewrite B站 cover URLs through images.weserv.nl to bypass hotlink protection."""
+    if not url:
+        return url
+    return _IMAGE_PROXY + url.replace("https://", "").replace("http://", "")
 
 import argparse
 import asyncio
@@ -100,7 +110,7 @@ function copyRSS(url, btn) {
 def _html(entry_list: list[_Entry]) -> str:
     cards = "\n".join(
         f"""<div class="card">
-<div class="card-cover" onclick="window.open('{e.link}')">{'<img src="' + e.cover + '" alt="" loading="lazy">' if e.cover else '<svg class="placeholder" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 15v-6l5 3-5 3z"/></svg>'}</div>
+<div class="card-cover" onclick="window.open('{e.link}')">{'<img src="' + _proxy_cover(e.cover) + '" alt="" loading="lazy" referrerpolicy="no-referrer">' if e.cover else '<svg class="placeholder" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 15v-6l5 3-5 3z"/></svg>'}</div>
 <div class="card-body">
 <h2>{e.title}</h2>
 <div class="author">{e.author}</div>
