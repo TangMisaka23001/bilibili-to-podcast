@@ -51,7 +51,7 @@ def _do_prune(output_root: Path, season_sids: set[str], series_sids: set[str]) -
     return season_names, series_names
 
 
-def prune(config_path: Path | str, output_root: str | Path = "../output/") -> PruneResult:
+def prune(config_path: Path | str, output_root: str | Path = "output") -> PruneResult:
     config = load_active_config(config_path)
     season_sids, series_sids = _sids(config)
     season_names, series_names = _do_prune(Path(output_root), season_sids, series_sids)
@@ -62,7 +62,7 @@ def main(argv: list[str] | None = None) -> int:
     import argparse
 
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", default="../config.yaml")
+    parser.add_argument("--config", default="config.yaml")
     parser.add_argument("--output-root", default="../output/")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
