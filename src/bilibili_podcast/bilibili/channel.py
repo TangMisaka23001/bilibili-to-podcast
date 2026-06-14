@@ -105,12 +105,15 @@ def fetch_one(ref: ChannelRef, output_root: Path) -> None:
             continue
         vdir = channel_dir / bv
         vdir.mkdir(parents=True, exist_ok=True)
-        info = fetch_video_info(bv)
-        write_video_meta(vdir, info)
-        download_audio(ref, bv, vdir)
-        download_picture(info["pic"], vdir / "pic.jpg")
-        write_video_complete(vdir)
-        logger.info(f"===> finished {bv}")
+        try:
+            info = fetch_video_info(bv)
+            write_video_meta(vdir, info)
+            download_audio(ref, bv, vdir)
+            download_picture(info["pic"], vdir / "pic.jpg")
+            write_video_complete(vdir)
+            logger.info(f"===> finished {bv}")
+        except Exception as e:
+            logger.error(f"===> failed {bv}: {e}")
 
 
 def fetch_all(refs: list[ChannelRef], output_root: Path = Path("output")) -> None:
