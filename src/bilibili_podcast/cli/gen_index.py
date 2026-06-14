@@ -75,8 +75,8 @@ _CSS = """\
   .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 20px; }
   .card { background: var(--card-bg); border-radius: 20px; overflow: hidden; display: flex; flex-direction: column; transition: transform 0.2s, box-shadow 0.2s; }
   .card:hover { transform: translateY(-4px); box-shadow: 0 12px 32px rgba(0,0,0,0.12); }
-  .card-cover { aspect-ratio: 1; width: 100%; background: linear-gradient(135deg, #e0e0e0, #ccc); display: flex; align-items: center; justify-content: center; overflow: hidden; cursor: pointer; position: relative; }
-  .card-cover img { width: 100%; height: 100%; object-fit: cover; }
+  .card-cover { aspect-ratio: 16 / 10; width: 100%; background: linear-gradient(135deg, #e0e0e0, #ccc); display: flex; align-items: center; justify-content: center; overflow: hidden; cursor: pointer; position: relative; }
+  .card-cover img { width: 100%; height: 100%; object-fit: contain; padding: 4px; }
   .card-cover .placeholder { width: 52px; height: 52px; opacity: 0.3; }
   .card-body { padding: 14px 16px 12px; display: flex; flex-direction: column; min-width: 0; flex: 1; }
   .card-body h2 { font-size: 0.95em; font-weight: 600; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-bottom: 4px; }
