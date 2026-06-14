@@ -1,66 +1,129 @@
-import os
-import boto3
+"""S3 (Cloudflare R2) sync: mirror a local root directory exactly into a bucket.
+
+After sync() returns, the bucket's keys are exactly the local root's relative file
+paths. Local-only keys are uploaded; remote-only keys are deleted; identical keys
+are skipped.
+"""
+from __future__ import annotations
+
 import json
+import os
+from dataclasses import dataclass, field
+
+import boto3
+from botocore.exceptions import ClientError
+
 from logger import logger
-from botocore.exceptions import NoCredentialsError, PartialCredentialsError, ClientError
-from config import BUCKET_NAME, ACCESS_KEY, SECRET_KEY, ENDPOINT_URL
 
 
-s3_client = boto3.session.Session().client(
-    service_name="s3",
-    aws_access_key_id=ACCESS_KEY,
-    aws_secret_access_key=SECRET_KEY,
-    endpoint_url=ENDPOINT_URL,
-)
+@dataclass
+class SyncResult:
+    uploaded: list[str] = field(default_factory=list)
+    deleted: list[str] = field(default_factory=list)
+    skipped: list[str] = field(default_factory=list)
 
 
-def object_exists(object_key, bucket_name=BUCKET_NAME):
+def make_s3_client(
+    access_key: str,
+    secret_key: str,
+    endpoint_url: str,
+):
+    return boto3.session.Session().client(
+        service_name="s3",
+        aws_access_key_id=access_key,
+        aws_secret_access_key=secret_key,
+        endpoint_url=endpoint_url,
+    )
+
+
+def _walk_local_keys(local_root: str) -> set[str]:
+    keys: set[str] = set()
+    for root, _, files in os.walk(local_root):
+        for name in files:
+            abs_path = os.path.join(root, name)
+            rel = os.path.relpath(abs_path, local_root)
+            keys.add(rel.replace(os.sep, "/"))
+    return keys
+
+
+def _list_remote_keys(client, bucket: str) -> set[str]:
+    keys: set[str] = set()
+    paginator = client.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=bucket):
+        for obj in page.get("Contents", []):
+            keys.add(obj["Key"])
+    return keys
+
+
+def sync(
+    local_root: str,
+    bucket_name: str,
+    client,
+) -> SyncResult:
+    local_keys = _walk_local_keys(local_root)
+    remote_keys = _list_remote_keys(client, bucket_name)
+
+    to_upload = sorted(local_keys - remote_keys)
+    to_delete = sorted(remote_keys - local_keys)
+    to_skip = sorted(local_keys & remote_keys)
+
+    result = SyncResult(uploaded=to_upload, deleted=to_delete, skipped=to_skip)
+
+    for key in to_upload:
+        local_path = os.path.join(local_root, key.replace("/", os.sep))
+        try:
+            client.upload_file(local_path, bucket_name, key)
+            logger.info(f"===> uploaded {key}")
+        except Exception as e:
+            logger.error(f"===> failed to upload {key}: {e}")
+
+    for key in to_delete:
+        try:
+            client.delete_object(Bucket=bucket_name, Key=key)
+            logger.info(f"===> deleted {key}")
+        except ClientError as e:
+            logger.error(f"===> failed to delete {key}: {e}")
+
+    return result
+
+
+# --- Backwards-compatible helpers used by file.py -----------------------------
+# These keep the original 2-arg signature (object_key, bucket_name) so the
+# existing file.py imports continue to work; they construct a client lazily.
+
+_LAZY_CLIENT = None
+
+
+def _default_client():
+    global _LAZY_CLIENT
+    if _LAZY_CLIENT is None:
+        from config import ACCESS_KEY, ENDPOINT_URL, SECRET_KEY
+        _LAZY_CLIENT = make_s3_client(ACCESS_KEY, SECRET_KEY, ENDPOINT_URL)
+    return _LAZY_CLIENT
+
+
+def object_exists(object_key: str, bucket_name: str) -> bool:
+    client = _default_client()
     try:
-        s3_client.head_object(Bucket=bucket_name, Key=object_key)
+        client.head_object(Bucket=bucket_name, Key=object_key)
     except ClientError as e:
         if e.response["Error"]["Code"] == "404":
             return False
-        else:
-            raise e
+        raise
     return True
 
 
-def get_object(object_key, bucket_name=BUCKET_NAME):
-    try:
-        # 从 S3 读取文件
-        response = s3_client.get_object(Bucket=bucket_name, Key=object_key)
-        # 从响应中获取文件内容
-        file_content = response['Body'].read().decode('utf-8')
-        # 解析为 JSON
-        return json.loads(file_content)
-    except Exception as e:
-        print(f"Error reading or parsing the file: {e}")
-
-
-def upload_files(local_folder, bucket_name=BUCKET_NAME, check_exist=True):
-    for root, _, files in os.walk(local_folder):
-        for file in files:
-            local_path = os.path.join(root, file)
-            relative_path = os.path.relpath(local_path, local_folder)
-            s3_path = local_folder.replace(
-                "../output/", "") + "/" + relative_path.replace(os.sep, "/")
-            if "videos.json" not in s3_path and check_exist and object_exists(s3_path):
-                logger.info(f"===> file exist skip {s3_path}")
-                continue
-            try:
-                s3_client.upload_file(local_path, bucket_name, s3_path)
-                logger.info(f"===> Successfully uploaded {s3_path}")
-            except FileNotFoundError:
-                logger.error(f"===> File not found: {local_path}")
-            except NoCredentialsError:
-                logger.error("===> Credentials not available")
-            except PartialCredentialsError:
-                logger.error("===> Incomplete credentials provided")
-            except Exception as e:
-                logger.error(f"===> Failed to upload {s3_path}: {e}")
+def get_object(object_key: str, bucket_name: str):
+    client = _default_client()
+    response = client.get_object(Bucket=bucket_name, Key=object_key)
+    return json.loads(response["Body"].read().decode("utf-8"))
 
 
 if __name__ == "__main__":
-    upload_files(local_folder="../output/rss", bucket_name=BUCKET_NAME, check_exist=False)
-    upload_files(local_folder="../output/bilibili-season", bucket_name=BUCKET_NAME)
-    upload_files(local_folder="../output/bilibili-series", bucket_name=BUCKET_NAME)
+    from config import BUCKET_NAME
+    client = _default_client()
+    result = sync("../output/", BUCKET_NAME, client)
+    logger.info(
+        f"===> sync done: uploaded={len(result.uploaded)} "
+        f"deleted={len(result.deleted)} skipped={len(result.skipped)}"
+    )
