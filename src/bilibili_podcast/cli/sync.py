@@ -16,7 +16,7 @@ def main(argv: list[str] | None = None) -> int:
     config = load_active_config(args.config)
     r2 = config["R2"]
     client = make_s3_client(r2["ACCESS_KEY"], r2["SECRET_KEY"], r2["ENDPOINT_URL"])
-    result = sync(args.output_root, r2["BUCKET_NAME"], client)
+    result = sync(args.output_root, r2["BUCKET_NAME"], client, force_prefixes=("rss",))
     print(
         f"uploaded={len(result.uploaded)} "
         f"deleted={len(result.deleted)} "

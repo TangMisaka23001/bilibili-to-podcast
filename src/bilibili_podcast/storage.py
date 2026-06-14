@@ -61,13 +61,22 @@ def sync(
     local_root: str,
     bucket_name: str,
     client,
+    force_prefixes: tuple[str, ...] = (),
 ) -> SyncResult:
+    """Mirror local_root to bucket.
+
+    Keys whose top-level directory matches any prefix in force_prefixes are
+    always re-uploaded even if the remote already has an identical key
+    (e.g. RSS XML should reflect latest metadata changes regardless of
+    previous upload state).
+    """
     local_keys = _walk_local_keys(local_root)
     remote_keys = _list_remote_keys(client, bucket_name)
 
-    to_upload = sorted(local_keys - remote_keys)
+    to_force = {k for k in (local_keys & remote_keys) if _top_dir(k) in force_prefixes}
+    to_upload = sorted((local_keys - remote_keys) | to_force)
     to_delete = sorted(remote_keys - local_keys)
-    to_skip = sorted(local_keys & remote_keys)
+    to_skip = sorted((local_keys & remote_keys) - to_force)
 
     result = SyncResult(uploaded=to_upload, deleted=to_delete, skipped=to_skip)
 
@@ -87,6 +96,10 @@ def sync(
             logger.error(f"===> failed to delete {key}: {e}")
 
     return result
+
+
+def _top_dir(key: str) -> str:
+    return key.split("/", 1)[0] if "/" in key else ""
 
 
 # --- Backwards-compatible helpers used by file.py -----------------------------
