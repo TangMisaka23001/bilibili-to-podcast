@@ -60,7 +60,7 @@ R2:
 
 ```bash
 # 一键全流程
-sh src/start.sh
+sh start.sh
 
 # 或分步执行
 b2p-prune                     # 清理不在 config 中的旧目录
@@ -97,26 +97,26 @@ docker run -d \
 │   └── FUNCTIONAL.md
 ├── tests/
 │   └── test_*.py
+├── start.sh                       # 一键脚本
 └── src/
-    ├── bilibili_podcast/
-    │   ├── config.py              # 配置加载
-    │   ├── config_loader.py       # sources → legacy 派生
-    │   ├── extract_url.py         # URL 解析
-    │   ├── storage.py             # R2 同步
-    │   ├── rss.py                 # RSS XML 生成
-    │   ├── xml_template.py        # 模板
-    │   ├── logger.py              # 日志
-    │   ├── bilibili/
-    │   │   ├── channel.py         # Season/Series 统一处理
-    │   │   ├── audio.py           # yt-dlp 音频抽取
-    │   │   └── meta.py            # 元数据读写
-    │   └── cli/
-    │       ├── prune.py           # b2p-prune
-    │       ├── fetch.py           # b2p-fetch
-    │       ├── rss_cmd.py         # b2p-rss
-    │       ├── sync.py            # b2p-sync
-    │       └── cron.py            # b2p-cron
-    └── start.sh                   # 一键脚本
+    └── bilibili_podcast/
+        ├── config.py
+        ├── config_loader.py
+        ├── extract_url.py
+        ├── storage.py
+        ├── rss.py
+        ├── xml_template.py
+        ├── logger.py
+        ├── bilibili/
+        │   ├── channel.py
+        │   ├── audio.py
+        │   └── meta.py
+        └── cli/
+            ├── prune.py
+            ├── fetch.py
+            ├── rss_cmd.py
+            ├── sync.py
+            └── cron.py
 ```
 
 ## 🔄 数据流
