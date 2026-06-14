@@ -1,21 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>bilibili podcast</title>
+<style>
+  :root { --bg: #f5f5f7; --card-bg: #fff; --text: #1d1d1f; --sub: #86868b; --accent: #0071e3; --tag-bg: #e8f0fe; --tag-text: #1a73e8; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #1c1c1e; --card-bg: #2c2c2e; --text: #f5f5f7; --sub: #98989d; --accent: #4da6ff; --tag-bg: #1a3a5c; --tag-text: #7ab8ff; } }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+  .container { max-width: 720px; margin: 0 auto; padding: 40px 20px 60px; }
+  .page-header { text-align: center; margin-bottom: 36px; }
+  .page-header h1 { font-size: 2em; font-weight: 700; letter-spacing: -0.5px; }
+  .page-header p { color: var(--sub); margin-top: 6px; font-size: 0.95em; }
+  .cards { display: grid; gap: 16px; }
+  .card { background: var(--card-bg); border-radius: 16px; overflow: hidden; display: flex; transition: transform 0.15s, box-shadow 0.15s; text-decoration: none; color: inherit; }
+  .card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.10); }
+  .card-cover { width: 120px; min-height: 120px; flex-shrink: 0; background: #e0e0e0; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  .card-cover img { width: 100%; height: 100%; object-fit: cover; }
+  .card-cover .placeholder { width: 40px; height: 40px; opacity: 0.25; }
+  .card-body { padding: 16px 20px; display: flex; flex-direction: column; justify-content: center; min-width: 0; flex: 1; }
+  .card-body h2 { font-size: 1.1em; font-weight: 600; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-bottom: 6px; }
+  .card-body .author { font-size: 0.88em; color: var(--sub); margin-bottom: 8px; }
+  .card-body .tag { display: inline-block; font-size: 0.75em; background: var(--tag-bg); color: var(--tag-text); padding: 2px 10px; border-radius: 10px; font-weight: 500; align-self: flex-start; }
+  @media (max-width: 500px) {
+    .card-cover { width: 90px; min-height: 90px; }
+    .card-body { padding: 12px 14px; }
+    .card-body h2 { font-size: 1em; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+<header class="page-header">
 <h1>bilibili podcast</h1>
-<h2>持续更新中。。。</h2>
-<a href="https://rss.beauty/rss?url=https://podcast.0xcafebabe.dpdns.org/rss/season/598034.xml">数学与认知方法讲座</a>
-</br>
-<a href="https://rss.beauty/rss?url=https://podcast.0xcafebabe.dpdns.org/rss/season/3866222.xml">点到为止第二季</a>
-</br>
-<a href="https://rss.beauty/rss?url=https://podcast.0xcafebabe.dpdns.org/rss/season/1966263.xml">主义的名义——《北平无战事》</a>
-</br>
-<a href="https://rss.beauty/rss?url=https://podcast.0xcafebabe.dpdns.org/rss/series/4891774.xml">WhynotTV播客</a>
-
-
-<h2>已完结。。。</h2>
-<a href="https://rss.beauty/rss?url=https://podcast.0xcafebabe.dpdns.org/rss/season/48036.xml">《大明王朝1566》全剧解说</a>
-</br>
-<a href="https://rss.beauty/rss?url=https://podcast.0xcafebabe.dpdns.org/rss/season/5852853.xml">戒社·13集</a>
-</br>
-<a href="https://rss.beauty/rss?url=https://podcast.0xcafebabe.dpdns.org/rss/series/907.xml">点到为止</a>
-</br>
-<a href="https://rss.beauty/rss?url=https://podcast.0xcafebabe.dpdns.org/rss/season/1164952.xml">译者精讲《卡拉马佐夫兄弟》</a>
-</br>
-<a href="https://rss.beauty/rss?url=https://podcast.0xcafebabe.dpdns.org/rss/season/5066155.xml">【不足万字 】火线系列精讲 第一季</a>
+<p>B 站视频合集 · 播客订阅</p>
+</header>
+<div class="cards">
+<a class="card" href="https://rss.beauty/rss?url=https://podcast.0xcafebabe.dpdns.org/rss/season/598034.xml">
+<div class="card-cover"><img src="https://s1.hdslb.com/bfs/templar/york-static/viedeo_material_default.png" alt="" loading="lazy"></div>
+<div class="card-body">
+<h2>数学与认知方法讲座</h2>
+<div class="author">Maki的完美算术教室</div>
+<span class="tag">合集</span>
+</div>
+</a>
+<a class="card" href="https://rss.beauty/rss?url=https://podcast.0xcafebabe.dpdns.org/rss/season/3866222.xml">
+<div class="card-cover"><img src="https://archive.biliimg.com/bfs/archive/7146df095b249eba3dea69f4427df5eb316eb76a.jpg" alt="" loading="lazy"></div>
+<div class="card-body">
+<h2>点到为止</h2>
+<div class="author">阿怪MrWeird</div>
+<span class="tag">合集</span>
+</div>
+</a>
+<a class="card" href="https://rss.beauty/rss?url=https://podcast.0xcafebabe.dpdns.org/rss/season/1966263.xml">
+<div class="card-cover"><img src="https://archive.biliimg.com/bfs/archive/247ae139662a8368d3517391dc525c2bdefaa6d4.jpg" alt="" loading="lazy"></div>
+<div class="card-body">
+<h2>主义的名义——《北平无战事》</h2>
+<div class="author">谢玄1991</div>
+<span class="tag">合集</span>
+</div>
+</a>
+<a class="card" href="https://rss.beauty/rss?url=https://podcast.0xcafebabe.dpdns.org/rss/season/1164952.xml">
+<div class="card-cover"><img src="https://archive.biliimg.com/bfs/archive/5188510c6f93f8ab4b00da99e5945783f8b796e4.jpg" alt="" loading="lazy"></div>
+<div class="card-body">
+<h2>译者精讲《卡拉马佐夫兄弟》</h2>
+<div class="author">乌兰巴乔夫</div>
+<span class="tag">合集</span>
+</div>
+</a>
+<a class="card" href="https://rss.beauty/rss?url=https://podcast.0xcafebabe.dpdns.org/rss/season/5066155.xml">
+<div class="card-cover"><img src="https://archive.biliimg.com/bfs/archive/36e074b8d4553b97beffd0ff70a8e3963e326110.jpg" alt="" loading="lazy"></div>
+<div class="card-body">
+<h2>【不足万字 】火线系列精讲 第一季</h2>
+<div class="author">晃悠咣当当</div>
+<span class="tag">合集</span>
+</div>
+</a>
+<a class="card" href="https://rss.beauty/rss?url=https://podcast.0xcafebabe.dpdns.org/rss/season/7589321.xml">
+<div class="card-cover"><img src="https://archive.biliimg.com/bfs/archive/ea1873c523d2bfa98614af52549da80184ec0704.jpg" alt="" loading="lazy"></div>
+<div class="card-body">
+<h2>Maki新版认知视频系列</h2>
+<div class="author">Maki的完美算术教室</div>
+<span class="tag">合集</span>
+</div>
+</a>
+<a class="card" href="https://rss.beauty/rss?url=https://podcast.0xcafebabe.dpdns.org/rss/season/3063525.xml">
+<div class="card-cover"><img src="https://archive.biliimg.com/bfs/archive/b91eb3cce0b581a20aa16650b8fc149a6293f54c.jpg" alt="" loading="lazy"></div>
+<div class="card-body">
+<h2>标普500定投</h2>
+<div class="author">Lazyman_Gold</div>
+<span class="tag">合集</span>
+</div>
+</a>
+<a class="card" href="https://rss.beauty/rss?url=https://podcast.0xcafebabe.dpdns.org/rss/series/4891774.xml">
+<div class="card-cover"><svg class="placeholder" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 15v-6l5 3-5 3z"/></svg></div>
+<div class="card-body">
+<h2>WhynotTV播客</h2>
+<div class="author">WhynotTV播客</div>
+<span class="tag">系列</span>
+</div>
+</a>
+</div>
+</div>
+</body>
+</html>
