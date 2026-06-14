@@ -54,42 +54,61 @@ def _build_entry(kind: str, sid: str, uid: str, prefix: str) -> _Entry:
 
 
 _CSS = """\
-  :root { --bg: #f5f5f7; --card-bg: #fff; --text: #1d1d1f; --sub: #86868b; --accent: #0071e3; --tag-bg: #e8f0fe; --tag-text: #1a73e8; }
-  @media (prefers-color-scheme: dark) { :root { --bg: #1c1c1e; --card-bg: #2c2c2e; --text: #f5f5f7; --sub: #98989d; --accent: #4da6ff; --tag-bg: #1a3a5c; --tag-text: #7ab8ff; } }
+  :root { --bg: #f2f2f7; --card-bg: #fff; --text: #1d1d1f; --sub: #86868b; --accent: #007aff; --btn-bg: #f2f2f7; --btn-hover: #e5e5ea; --tag-bg: #e8f0fe; --tag-text: #1a73e8; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #000; --card-bg: #1c1c1e; --text: #f5f5f7; --sub: #98989d; --accent: #0a84ff; --btn-bg: #2c2c2e; --btn-hover: #3a3a3c; --tag-bg: #1a3a5c; --tag-text: #7ab8ff; } }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
-  .container { max-width: 720px; margin: 0 auto; padding: 40px 20px 60px; }
-  .page-header { text-align: center; margin-bottom: 36px; }
+  .container { max-width: 960px; margin: 0 auto; padding: 48px 20px 80px; }
+  .page-header { text-align: center; margin-bottom: 40px; }
   .page-header h1 { font-size: 2em; font-weight: 700; letter-spacing: -0.5px; }
   .page-header p { color: var(--sub); margin-top: 6px; font-size: 0.95em; }
-  .cards { display: grid; gap: 16px; }
-  .card { background: var(--card-bg); border-radius: 16px; overflow: hidden; display: flex; transition: transform 0.15s, box-shadow 0.15s; text-decoration: none; color: inherit; }
-  .card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.10); }
-  .card-cover { width: 120px; min-height: 120px; flex-shrink: 0; background: #e0e0e0; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 20px; }
+  .card { background: var(--card-bg); border-radius: 20px; overflow: hidden; display: flex; flex-direction: column; transition: transform 0.2s, box-shadow 0.2s; }
+  .card:hover { transform: translateY(-4px); box-shadow: 0 12px 32px rgba(0,0,0,0.12); }
+  .card-cover { aspect-ratio: 1; width: 100%; background: linear-gradient(135deg, #e0e0e0, #ccc); display: flex; align-items: center; justify-content: center; overflow: hidden; cursor: pointer; position: relative; }
   .card-cover img { width: 100%; height: 100%; object-fit: cover; }
-  .card-cover .placeholder { width: 40px; height: 40px; opacity: 0.25; }
-  .card-body { padding: 16px 20px; display: flex; flex-direction: column; justify-content: center; min-width: 0; flex: 1; }
-  .card-body h2 { font-size: 1.1em; font-weight: 600; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-bottom: 6px; }
-  .card-body .author { font-size: 0.88em; color: var(--sub); margin-bottom: 8px; }
-  .card-body .tag { display: inline-block; font-size: 0.75em; background: var(--tag-bg); color: var(--tag-text); padding: 2px 10px; border-radius: 10px; font-weight: 500; align-self: flex-start; }
-  @media (max-width: 500px) {
-    .card-cover { width: 90px; min-height: 90px; }
-    .card-body { padding: 12px 14px; }
-    .card-body h2 { font-size: 1em; }
-  }\
+  .card-cover .placeholder { width: 52px; height: 52px; opacity: 0.3; }
+  .card-body { padding: 14px 16px 12px; display: flex; flex-direction: column; min-width: 0; flex: 1; }
+  .card-body h2 { font-size: 0.95em; font-weight: 600; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-bottom: 4px; }
+  .card-body .author { font-size: 0.82em; color: var(--sub); margin-bottom: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .card-body .bottom { display: flex; align-items: center; justify-content: space-between; margin-top: auto; }
+  .card-body .tag { font-size: 0.72em; background: var(--tag-bg); color: var(--tag-text); padding: 2px 8px; border-radius: 8px; font-weight: 500; }
+  .card-body .tag.season { background: #e8f0fe; color: #1a73e8; }
+  .card-body .tag.series { background: #fce8e6; color: #ea4335; }
+  @media (prefers-color-scheme: dark) { .card-body .tag.season { background: #1a3a5c; color: #7ab8ff; } .card-body .tag.series { background: #5c1a1a; color: #ff7a7a; } }
+  .copy-btn { background: var(--btn-bg); border: none; color: var(--accent); font-size: 0.78em; font-weight: 500; padding: 6px 14px; border-radius: 20px; cursor: pointer; transition: background 0.15s; white-space: nowrap; }
+  .copy-btn:hover { background: var(--btn-hover); }
+  .copy-btn.copied { color: #34c759; }
+  .toast { position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 10px 24px; border-radius: 20px; font-size: 0.88em; opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 100; }
+  .toast.show { opacity: 1; }
+  @media (max-width: 520px) { .cards { grid-template-columns: repeat(2, 1fr); gap: 12px; } .card-body { padding: 10px 12px; } }
+\
+
+
+_JS = r"""\
+function copyRSS(url, btn) {
+  navigator.clipboard.writeText(url).then(() => {
+    btn.textContent = '\u2714 已复制';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = '复制链接'; btn.classList.remove('copied'); }, 2000);
+  });
+}\
 """
 
 
 def _html(entry_list: list[_Entry]) -> str:
     cards = "\n".join(
-        f"""<a class="card" href="{e.link}">
-<div class="card-cover">{'<img src="' + e.cover + '" alt="" loading="lazy">' if e.cover else '<svg class="placeholder" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 15v-6l5 3-5 3z"/></svg>'}</div>
+        f"""<div class="card">
+<div class="card-cover" onclick="window.open('{e.link}')">{'<img src="' + e.cover + '" alt="" loading="lazy">' if e.cover else '<svg class="placeholder" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 15v-6l5 3-5 3z"/></svg>'}</div>
 <div class="card-body">
 <h2>{e.title}</h2>
 <div class="author">{e.author}</div>
-<span class="tag">{'合集' if e.kind == 'season' else '系列'}</span>
+<div class="bottom">
+<span class="tag {'season' if e.kind == 'season' else 'series'}">{'合集' if e.kind == 'season' else '系列'}</span>
+<button class="copy-btn" onclick="copyRSS('{e.link}',this)">复制链接</button>
 </div>
-</a>"""
+</div>
+</div>"""
         for e in entry_list
     )
 
@@ -113,6 +132,9 @@ def _html(entry_list: list[_Entry]) -> str:
 {cards}
 </div>
 </div>
+<script>
+{_JS}
+</script>
 </body>
 </html>
 """
