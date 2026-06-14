@@ -126,7 +126,7 @@ def _html(entry_list: list[_Entry]) -> str:
 <div class="container">
 <header class="page-header">
 <h1>bilibili podcast</h1>
-<p>B 站视频合集 · 播客订阅</p>
+<p>B 站视频合集 / 播客订阅</p>
 </header>
 <div class="cards">
 {cards}
