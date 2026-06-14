@@ -3,9 +3,12 @@
 Read top-level scalars (`RSS_URL_PREFIX`, `PORT`, `R2.*`) into module-level
 variables. The active `season` / `series` collection lists are resolved by
 src.tools.config_loader so both legacy and `sources:` configs work.
+
+Importing this module triggers a one-time yaml load. Lazy-imports the loader
+so the file works whether the caller runs from inside src/ (legacy scripts)
+or from the project root (e.g. `python -m src.tools.prune_output`).
 """
 from logger import logger
-from src.tools.config_loader import load_active_config
 
 
 RSS_URL_PREFIX = ""
@@ -25,6 +28,14 @@ season_rss_path = "bilibili-season/"
 
 
 def _load_global_config():
+    import sys
+    from pathlib import Path
+    here = Path(__file__).resolve().parent
+    project_root = here.parent
+    if str(project_root) not in sys.path:
+        sys.path.insert(0, str(project_root))
+    from src.tools.config_loader import load_active_config
+
     global config, RSS_URL_PREFIX, ACCESS_KEY, SECRET_KEY, ENDPOINT_URL, BUCKET_NAME, PORT
     config = load_active_config("../config.yaml")
     logger.info("===> load config.yaml")
