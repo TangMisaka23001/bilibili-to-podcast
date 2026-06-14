@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from src.tools.cli import main
+from bilibili_podcast.cli._config_cli import main
 
 
 def _run_cli(config: dict, argv: list[str] | None = None):

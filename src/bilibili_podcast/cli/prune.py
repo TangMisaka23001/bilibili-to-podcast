@@ -11,7 +11,7 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from src.tools.config_loader import ConfigError, load_active_config
+from bilibili_podcast.config_loader import ConfigError, load_active_config
 
 
 @dataclass

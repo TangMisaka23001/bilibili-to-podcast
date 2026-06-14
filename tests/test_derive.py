@@ -1,6 +1,6 @@
 import pytest
 
-from src.tools.extract_url import parse_sources, to_legacy_config
+from bilibili_podcast.extract_url import parse_sources, to_legacy_config
 
 
 def test_parse_sources_returns_one_per_url():

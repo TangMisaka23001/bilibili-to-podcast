@@ -4,7 +4,7 @@ from pathlib import Path
 
 import yaml
 
-from src.tools.extract_url import parse_sources, to_legacy_config
+from bilibili_podcast.extract_url import parse_sources, to_legacy_config
 
 
 EXIT_OK = 0

@@ -1,6 +1,6 @@
 import pytest
 
-from src.tools.extract_url import parse_url
+from bilibili_podcast.extract_url import parse_url
 
 
 def test_parse_url_season_extracts_uid_sid_and_type():

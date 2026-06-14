@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from src.tools.config_loader import load_active_config, ConfigError
+from bilibili_podcast.config_loader import load_active_config, ConfigError
 
 
 def _write(tmp_path: Path, data: dict) -> Path:

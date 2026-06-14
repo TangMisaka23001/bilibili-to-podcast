@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from src.tools.prune_output import prune, PruneResult
+from bilibili_podcast.cli.prune import prune, PruneResult
 
 
 @pytest.fixture
