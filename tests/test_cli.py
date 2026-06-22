@@ -8,26 +8,26 @@ import yaml
 from bilibili_podcast.cli._config_cli import main
 
 
-def _run_cli(config: dict, argv: list[str] | None = None):
+def _run_cli(config: dict, tmp_path: Path, argv: list[str] | None = None):
     if argv is None:
         argv = ["config.yaml"]
-    config_path = Path(argv[0])
+    config_path = tmp_path / argv[0]
     config_path.write_text(yaml.safe_dump(config, allow_unicode=True, sort_keys=False))
 
     out = io.StringIO()
     err = io.StringIO()
-    exit_code = main(argv, stdout=out, stderr=err)
+    exit_code = main([str(config_path)], stdout=out, stderr=err)
     return exit_code, out.getvalue(), err.getvalue(), config_path
 
 
-def test_cli_passes_through_when_no_sources():
+def test_cli_passes_through_when_no_sources(tmp_path):
     config = {
         "RSS_URL_PREFIX": "https://podcast.example.com/",
         "season": [{"uid": "1", "sid": "10"}],
         "series": [{"uid": "2", "sid": "20"}],
     }
 
-    exit_code, out, err, path = _run_cli(config)
+    exit_code, out, err, path = _run_cli(config, tmp_path)
 
     assert exit_code == 0
     loaded = yaml.safe_load(out)
@@ -35,7 +35,7 @@ def test_cli_passes_through_when_no_sources():
     assert loaded["series"] == [{"uid": "2", "sid": "20"}]
 
 
-def test_cli_derives_legacy_from_sources():
+def test_cli_derives_legacy_from_sources(tmp_path):
     config = {
         "RSS_URL_PREFIX": "https://podcast.example.com/",
         "sources": [
@@ -44,7 +44,7 @@ def test_cli_derives_legacy_from_sources():
         ],
     }
 
-    exit_code, out, err, path = _run_cli(config)
+    exit_code, out, err, path = _run_cli(config, tmp_path)
 
     assert exit_code == 0
     loaded = yaml.safe_load(out)
@@ -52,20 +52,20 @@ def test_cli_derives_legacy_from_sources():
     assert loaded["series"] == [{"uid": "2", "sid": "20"}]
 
 
-def test_cli_errors_when_sources_and_legacy_both_present():
+def test_cli_errors_when_sources_and_legacy_both_present(tmp_path):
     config = {
         "RSS_URL_PREFIX": "https://podcast.example.com/",
         "sources": ["https://space.bilibili.com/1/lists/10?type=season"],
         "season": [{"uid": "9", "sid": "99"}],
     }
 
-    exit_code, out, err, path = _run_cli(config)
+    exit_code, out, err, path = _run_cli(config, tmp_path)
 
     assert exit_code == 4
     assert "sources" in err and "season" in err
 
 
-def test_cli_errors_on_invalid_url_in_sources():
+def test_cli_errors_on_invalid_url_in_sources(tmp_path):
     config = {
         "RSS_URL_PREFIX": "https://podcast.example.com/",
         "sources": [
@@ -74,7 +74,7 @@ def test_cli_errors_on_invalid_url_in_sources():
         ],
     }
 
-    exit_code, out, err, path = _run_cli(config)
+    exit_code, out, err, path = _run_cli(config, tmp_path)
 
     assert exit_code == 1
     assert "example.com" in err

@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -23,18 +24,21 @@ def workspace(tmp_path: Path) -> Path:
     return out
 
 
-def _config(tmp_path: Path, **kw) -> Path:
-    cfg = {"RSS_URL_PREFIX": "https://x/", **kw}
-    p = tmp_path / "config.yaml"
-    p.write_text(yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False))
-    return p
+def _config(tmp_path: Path, sources: list[str]) -> Path:
+    (tmp_path / "config.yaml").write_text(
+        yaml.safe_dump({"RSS_URL_PREFIX": "https://x/"}, allow_unicode=True, sort_keys=False)
+    )
+    (tmp_path / "sources.json").write_text(json.dumps(sources, ensure_ascii=False))
+    return tmp_path / "config.yaml"
 
 
 def test_prune_deletes_sids_not_in_legacy_season(workspace, tmp_path):
     cfg = _config(
         tmp_path,
-        season=[{"uid": "1", "sid": "598034"}],
-        series=[{"uid": "2", "sid": "4281748"}],
+        sources=[
+            "https://space.bilibili.com/1/lists/598034?type=season",
+            "https://space.bilibili.com/2/lists/4281748?type=series",
+        ],
     )
 
     result = prune(cfg, output_root=str(workspace))
@@ -48,8 +52,10 @@ def test_prune_deletes_sids_not_in_legacy_season(workspace, tmp_path):
 def test_prune_keeps_rss_dir_untouched(workspace, tmp_path):
     cfg = _config(
         tmp_path,
-        season=[{"uid": "1", "sid": "598034"}],
-        series=[{"uid": "2", "sid": "4281748"}],
+        sources=[
+            "https://space.bilibili.com/1/lists/598034?type=season",
+            "https://space.bilibili.com/2/lists/4281748?type=series",
+        ],
     )
 
     prune(cfg, output_root=str(workspace))
@@ -58,7 +64,7 @@ def test_prune_keeps_rss_dir_untouched(workspace, tmp_path):
 
 
 def test_prune_does_not_recurse_into_kept_dirs(workspace, tmp_path):
-    cfg = _config(tmp_path, season=[{"uid": "1", "sid": "598034"}])
+    cfg = _config(tmp_path, sources=["https://space.bilibili.com/1/lists/598034?type=season"])
     (workspace / "bilibili-season" / "598034" / "BV1" / "BV1.m4a").touch()
 
     prune(cfg, output_root=str(workspace))
@@ -81,19 +87,8 @@ def test_prune_handles_sources_field(workspace, tmp_path):
     assert result.deleted_series == ["12345"]
 
 
-def test_prune_errors_when_sources_and_legacy_both_present(workspace, tmp_path):
-    cfg = _config(
-        tmp_path,
-        sources=["https://space.bilibili.com/1/lists/598034?type=season"],
-        season=[{"uid": "9", "sid": "99"}],
-    )
-
-    with pytest.raises(Exception, match="sources"):
-        prune(cfg, output_root=str(workspace))
-
-
 def test_prune_with_no_sids_in_config_deletes_all(workspace, tmp_path):
-    cfg = _config(tmp_path)  # no season/series
+    cfg = _config(tmp_path, sources=[])
 
     result = prune(cfg, output_root=str(workspace))
 
@@ -107,8 +102,12 @@ def test_prune_with_no_sids_in_config_deletes_all(workspace, tmp_path):
 def test_prune_returns_empty_when_everything_matches(workspace, tmp_path):
     cfg = _config(
         tmp_path,
-        season=[{"uid": "1", "sid": "598034"}, {"uid": "9", "sid": "999"}],
-        series=[{"uid": "2", "sid": "4281748"}, {"uid": "3", "sid": "12345"}],
+        sources=[
+            "https://space.bilibili.com/1/lists/598034?type=season",
+            "https://space.bilibili.com/9/lists/999?type=season",
+            "https://space.bilibili.com/2/lists/4281748?type=series",
+            "https://space.bilibili.com/3/lists/12345?type=series",
+        ],
     )
 
     result = prune(cfg, output_root=str(workspace))
