@@ -62,6 +62,7 @@ pip install -e ".[dev]"
 | `R2_SECRET_KEY` | ✅ | Cloudflare R2 Secret Access Key | `xxxxxxxxxx` |
 | `R2_ENDPOINT_URL` | ✅ | R2 S3 Endpoint | `https://<account-id>.r2.cloudflarestorage.com` |
 | `R2_BUCKET_NAME` | ✅ | R2 桶名 | `bilibili-podcast` |
+| `B2P_COOKIE_CONTENT` | — | B 站 cookies.txt 全文（CI 场景使用，本地可直接放 `src/cookie` 文件） | 浏览器导出的内容 |
 
 也可以放到 shell rc 或 `.env` 文件里 source 后再跑。  
 本地开发最小可用配置：

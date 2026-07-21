@@ -27,6 +27,8 @@ season_base_path = "output/bilibili-season/"
 series_rss_path = "bilibili-series/"
 season_rss_path = "bilibili-season/"
 
+COOKIE_ENV_VAR = "B2P_COOKIE_CONTENT"
+
 
 def _load_global_config():
     import sys

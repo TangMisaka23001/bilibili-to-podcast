@@ -161,7 +161,10 @@ python upload_r2.py
 
 ### `cookie` 文件
 
-B 站部分视频需要登录态（大会员、付费内容）。把浏览器导出的 cookies.txt 放到 `src/cookie`，yt_dlp 会自动使用。
+B 站部分视频需要登录态（大会员、付费内容）。两种方式：
+
+- **本地**：把浏览器导出的 cookies.txt 放到 `src/cookie`，yt_dlp 会自动使用。
+- **CI / 环境变量**：把 cookies.txt 的内容放到环境变量 `B2P_COOKIE_CONTENT` 里，`download_audio` 会把它写到临时文件给 yt_dlp 用，跑完即删。仓库不需要保留任何 cookie 文件，适合 GitHub Actions 配 Secret。
 
 ---
 
