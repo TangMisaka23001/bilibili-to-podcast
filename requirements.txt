@@ -5,4 +5,4 @@ yt-dlp==2026.6.9
 schedule==1.2.2
 pytest==9.1.0
 moto[s3]==5.2.2
-# bilibili-api-python installed from git (dev branch), see pyproject.toml
+# bilibili-api-python installed from local vendor/ fork snapshot, see pyproject.toml

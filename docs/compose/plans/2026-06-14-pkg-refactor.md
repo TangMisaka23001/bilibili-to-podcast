@@ -6,7 +6,7 @@
 
 **Architecture:** Move all source under `src/bilibili_podcast/`, add `pyproject.toml` with `console_scripts` entry points, split CLI from library, merge season/series duplication into a single `ChannelType`-driven `fetch_all()`. Each task is a separate commit; tests gate every step.
 
-**Tech Stack:** Python ≥ 3.11, boto3, PyYAML, yt-dlp, schedule, bilibili-api (dev branch), pytest, moto.
+**Tech Stack:** Python ≥ 3.11, boto3, PyYAML, yt-dlp, schedule, bilibili-api (fork main), pytest, moto.
 
 **Spec:** `docs/compose/specs/2026-06-14-pkg-refactor-design.md`
 

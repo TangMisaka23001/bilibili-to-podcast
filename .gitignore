@@ -166,3 +166,7 @@ output/
 
 config.yaml
 cookie
+bilibili-api-main.zip
+vendor/
+
+.mimocode/
