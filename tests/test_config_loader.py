@@ -15,7 +15,9 @@ def _write_yaml(tmp_path: Path, data: dict) -> Path:
 
 def _write_sources(tmp_path: Path, urls: list[str]) -> Path:
     p = tmp_path / "sources.json"
-    p.write_text(json.dumps(urls, ensure_ascii=False, indent=2))
+    p.write_text(
+        json.dumps({"all": urls, "new": []}, ensure_ascii=False, indent=2)
+    )
     return p
 
 
@@ -31,8 +33,8 @@ def test_load_active_config_passes_through_legacy_season_and_series(tmp_path):
 
     result = load_active_config(tmp_path / "config.yaml")
 
-    assert result["season"] == [{"uid": "1", "sid": "10"}]
-    assert result["series"] == [{"uid": "2", "sid": "20"}]
+    assert result["season"] == [{"uid": "1", "sid": "10", "type": "season"}]
+    assert result["series"] == [{"uid": "2", "sid": "20", "type": "series"}]
     assert result["RSS_URL_PREFIX"] == "https://x/"
 
 
@@ -45,8 +47,8 @@ def test_load_active_config_derives_from_sources_json(tmp_path):
 
     result = load_active_config(tmp_path / "config.yaml")
 
-    assert result["season"] == [{"uid": "1", "sid": "10"}]
-    assert result["series"] == [{"uid": "2", "sid": "20"}]
+    assert result["season"] == [{"uid": "1", "sid": "10", "type": "season"}]
+    assert result["series"] == [{"uid": "2", "sid": "20", "type": "series"}]
 
 
 def test_load_active_config_errors_when_sources_json_missing(tmp_path):
@@ -81,5 +83,5 @@ def test_load_active_config_works_when_yaml_missing(tmp_path):
 
     result = load_active_config(tmp_path / "config.yaml")
 
-    assert result["season"] == [{"uid": "1", "sid": "10"}]
+    assert result["season"] == [{"uid": "1", "sid": "10", "type": "season"}]
     assert result["series"] == []

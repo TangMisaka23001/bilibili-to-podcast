@@ -60,6 +60,6 @@ def parse_sources(urls: list[str]) -> list[ChannelSource]:
 
 def to_legacy_config(sources: list[ChannelSource]) -> dict:
     return {
-        "season": [{"uid": s.uid, "sid": s.sid} for s in sources if s.type == "season"],
-        "series": [{"uid": s.uid, "sid": s.sid} for s in sources if s.type == "series"],
+        "season": [{"uid": s.uid, "sid": s.sid, "type": s.type} for s in sources if s.type == "season"],
+        "series": [{"uid": s.uid, "sid": s.sid, "type": s.type} for s in sources if s.type == "series"],
     }

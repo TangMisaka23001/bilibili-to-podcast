@@ -24,8 +24,10 @@ config = {}
 bilibili_link_prefix = "https://www.bilibili.com/video/"
 series_base_path = "output/bilibili-series/"
 season_base_path = "output/bilibili-season/"
+new_base_path = "output/bilibili-new/"
 series_rss_path = "bilibili-series/"
 season_rss_path = "bilibili-season/"
+new_rss_path = "bilibili-new/"
 
 COOKIE_ENV_VAR = "B2P_COOKIE_CONTENT"
 

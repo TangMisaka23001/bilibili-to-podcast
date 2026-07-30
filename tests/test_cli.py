@@ -48,8 +48,8 @@ def test_cli_derives_legacy_from_sources(tmp_path):
 
     assert exit_code == 0
     loaded = yaml.safe_load(out)
-    assert loaded["season"] == [{"uid": "1", "sid": "10"}]
-    assert loaded["series"] == [{"uid": "2", "sid": "20"}]
+    assert loaded["season"] == [{"uid": "1", "sid": "10", "type": "season"}]
+    assert loaded["series"] == [{"uid": "2", "sid": "20", "type": "series"}]
 
 
 def test_cli_errors_when_sources_and_legacy_both_present(tmp_path):

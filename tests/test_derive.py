@@ -41,8 +41,8 @@ def test_to_legacy_config_partitions_by_type():
     legacy = to_legacy_config(sources)
 
     assert legacy == {
-        "season": [{"uid": "1", "sid": "10"}, {"uid": "3", "sid": "30"}],
-        "series": [{"uid": "2", "sid": "20"}],
+        "season": [{"uid": "1", "sid": "10", "type": "season"}, {"uid": "3", "sid": "30", "type": "season"}],
+        "series": [{"uid": "2", "sid": "20", "type": "series"}],
     }
 
 
