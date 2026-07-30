@@ -126,6 +126,13 @@ _CSS = """\
   .card-body .latest-label { font-weight: 500; color: var(--text); margin-bottom: 4px; }
   .card-body .latest-title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.35; margin-bottom: 4px; color: var(--text); }
   .card-body .latest-date { font-size: 0.92em; opacity: 0.85; }
+  .cards > .card.banner { grid-column: 1 / -1; background: linear-gradient(135deg, var(--tag-bg), var(--card-bg)); border: 1px solid rgba(0,0,0,0.04); }
+  @media (prefers-color-scheme: dark) { .cards > .card.banner { border-color: rgba(255,255,255,0.06); } }
+  .card.banner .card-body.banner-body { padding: 18px 24px 16px; }
+  .card.banner .card-body h2 { font-size: 1.1em; -webkit-line-clamp: 1; margin-bottom: 4px; }
+  .card.banner .author { font-size: 0.85em; }
+  .card-body .tag.new { background: #34c759; color: #fff; }
+  @media (prefers-color-scheme: dark) { .card-body .tag.new { background: #30d158; color: #000; } }
   .toast { position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 10px 24px; border-radius: 20px; font-size: 0.88em; opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 100; }
   .toast.show { opacity: 1; }
   @media (max-width: 520px) { .cards { grid-template-columns: repeat(2, 1fr); gap: 12px; } .card-body { padding: 10px 12px; } }
@@ -142,8 +149,23 @@ _JS = r"""function copyRSS(url, btn) {
 }"""
 
 
-def _html(entry_list: list[_Entry]) -> str:
-    cards = "\n".join(
+def _banner_html(prefix: str, new_refs: list[dict]) -> str:
+    """Top-of-page banner linking to rss/new.xml, only emitted when new_refs non-empty."""
+    link = f"{_RSS_BEAUTY}{prefix}/rss/new.xml"
+    return f"""<div class="card banner">
+<div class="card-body banner-body">
+<h2>最新视频合集</h2>
+<div class="author">B 站新发现合集 / 系列实时更新（每个链接取最近 5 个视频，跨 sid 合并）</div>
+<div class="bottom">
+<span class="tag new">新</span>
+<button class="copy-btn" onclick="copyRSS('{link}',this)">复制链接</button>
+</div>
+</div>
+</div>"""
+
+
+def _html(entry_list: list[_Entry], banner_html: str = "") -> str:
+    cards = banner_html + ("\n" if banner_html and entry_list else "") + "\n".join(
         f"""<div class="card">
 <div class="card-cover" onclick="window.open('{e.link}')">{'<img src="' + _proxy_cover(e.cover) + '" alt="" loading="lazy" referrerpolicy="no-referrer">' if e.cover else '<svg class="placeholder" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 15v-6l5 3-5 3z"/></svg>'}</div>
 <div class="card-body">
@@ -203,8 +225,9 @@ def generate(config_path: str, output: str, output_root: str | Path = "output") 
         sid, uid = str(c["sid"]), str(c["uid"])
         entries.append(_build_entry("series", sid, uid, prefix, Path(output_root)))
 
-    Path(output).write_text(_html(entries), encoding="utf-8")
-    logger.info(f"===> wrote {output} ({len(entries)} entries)")
+    banner = _banner_html(prefix, config.get("new", [])) if config.get("new") else ""
+    Path(output).write_text(_html(entries, banner_html=banner), encoding="utf-8")
+    logger.info(f"===> wrote {output} ({len(entries)} entries, banner={'yes' if banner else 'no'})")
 
 
 def main(argv: list[str] | None = None) -> int:

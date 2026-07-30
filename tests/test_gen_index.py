@@ -116,3 +116,88 @@ def test_load_latest_pubdate_zero_yields_empty_date(tmp_path: Path):
     title, date = _load_latest("100", "season", tmp_path)
     assert title == "no date"
     assert date == ""
+
+
+# --- top banner for rss/new.xml ---
+
+def test_banner_html_links_to_rss_new_xml():
+    from bilibili_podcast.cli.gen_index import _banner_html
+
+    html = _banner_html("https://podcast.example.com", [{"uid": "1", "sid": "100", "type": "season"}])
+
+    assert 'class="card banner"' in html
+    assert "最新视频合集" in html
+    assert 'rss/new.xml' in html
+    assert 'href="https://rss.beauty/rss?url=https://podcast.example.com/rss/new.xml"' not in html  # not anchor; we use onclick + copyRSS
+    assert "copyRSS('https://rss.beauty/rss?url=https://podcast.example.com/rss/new.xml',this)" in html
+
+
+def test_html_includes_banner_when_provided():
+    from bilibili_podcast.cli.gen_index import _html
+
+    entry = _Entry(
+        kind="season", sid="100", title="t", author="a", cover="",
+        link="https://rss.beauty/rss?url=https://p.example.com/rss/season/100.xml",
+    )
+    banner = '<div class="card banner">BANNER</div>'
+    html = _html([entry], banner_html=banner)
+    assert html.find('class="card banner"') < html.find('class="card">')
+
+
+def test_html_omits_banner_when_empty():
+    from bilibili_podcast.cli.gen_index import _html
+
+    entry = _Entry(
+        kind="season", sid="100", title="t", author="a", cover="",
+        link="https://rss.beauty/rss?url=https://p.example.com/rss/season/100.xml",
+    )
+    html = _html([entry], banner_html="")
+    assert 'class="card banner"' not in html
+    assert 'class="card">' in html
+
+
+def test_generate_emits_banner_when_new_non_empty(monkeypatch, tmp_path):
+    """End-to-end: when sources.json has new entries, the rendered HTML contains the banner."""
+    from bilibili_podcast.cli import gen_index as gi
+
+    # Mock _fetch_meta to avoid hitting B站 API
+    monkeypatch.setattr(gi, "_fetch_meta", lambda sid, uid, kind: {
+        "id": int(sid), "mid": int(uid), "title": f"title-{sid}", "cover": "",
+        "upper": {"name": f"up-{uid}"},
+    })
+
+    import json
+    (tmp_path / "config.yaml").write_text("RSS_URL_PREFIX: https://p.example.com\n", encoding="utf-8")
+    (tmp_path / "sources.json").write_text(json.dumps({
+        "all": ["https://space.bilibili.com/1/lists/100?type=season"],
+        "new": ["https://space.bilibili.com/2/lists/200?type=season"],
+    }, ensure_ascii=False), encoding="utf-8")
+
+    out = tmp_path / "index.html"
+    gi.generate(str(tmp_path / "config.yaml"), str(out))
+
+    html = out.read_text()
+    assert 'class="card banner"' in html
+    assert "最新视频合集" in html
+
+
+def test_generate_skips_banner_when_new_empty(monkeypatch, tmp_path):
+    from bilibili_podcast.cli import gen_index as gi
+
+    monkeypatch.setattr(gi, "_fetch_meta", lambda sid, uid, kind: {
+        "id": int(sid), "mid": int(uid), "title": f"title-{sid}", "cover": "",
+        "upper": {"name": f"up-{uid}"},
+    })
+
+    import json
+    (tmp_path / "config.yaml").write_text("RSS_URL_PREFIX: https://p.example.com\n", encoding="utf-8")
+    (tmp_path / "sources.json").write_text(json.dumps({
+        "all": ["https://space.bilibili.com/1/lists/100?type=season"],
+        "new": [],
+    }, ensure_ascii=False), encoding="utf-8")
+
+    out = tmp_path / "index.html"
+    gi.generate(str(tmp_path / "config.yaml"), str(out))
+
+    html = out.read_text()
+    assert 'class="card banner"' not in html
