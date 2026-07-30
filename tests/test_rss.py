@@ -191,3 +191,138 @@ def test_load_json_reads_file(tmp_path: Path):
     p = tmp_path / "test.json"
     p.write_text('{"key": "value"}')
     assert rss._load_json(p) == {"key": "value"}
+
+
+# --- generate new (merged feed) ---
+
+def _setup_new_channel(base: str, sid: str, videos: list[dict], kind: str = "season") -> None:
+    ch = Path(base) / sid
+    if kind == "season":
+        _write_json(ch / "meta.json", {
+            "id": int(sid),
+            "mid": 391930545,
+            "title": f"合集 {sid}",
+            "cover": f"https://i.example.com/new-{sid}.jpg",
+            "upper": {"name": f"UPnew{sid}"},
+        })
+    else:
+        _write_json(ch / "meta.json", {
+            "series_id": int(sid),
+            "mid": 12345,
+            "name": f"系列 {sid}",
+            "description": f"描述 {sid}",
+            "cover": f"https://i.example.com/new-{sid}.jpg",
+            "upper": {"name": f"UPnew{sid}"},
+        })
+    _write_json(ch / "videos.json", videos)
+    for v in videos:
+        bv = v["bvid"]
+        _write_json(ch / bv / "meta.json", {
+            "bvid": bv,
+            "title": v["title"],
+            "desc": v.get("desc", ""),
+            "pic": v.get("pic", ""),
+            "duration": v.get("duration", 0),
+            "pubdate": v.get("pubdate", 0),
+        })
+
+
+def test_generate_new_merges_top_n_across_sids(monkeypatch, tmp_path: Path):
+    """new.xml merges the top-5 newest per sid across multiple new-sids."""
+    base = tmp_path / "bilibili-new"
+    _setup_new_channel(str(base), "100", [
+        {"bvid": "BVaa1", "title": "A1", "pubdate": 1700000100, "duration": 10, "pic": ""},
+        {"bvid": "BVaa2", "title": "A2", "pubdate": 1700000200, "duration": 20, "pic": ""},
+        {"bvid": "BVaa3", "title": "A3", "pubdate": 1700000300, "duration": 30, "pic": ""},
+    ])
+    _setup_new_channel(str(base), "200", [
+        {"bvid": "BVbb1", "title": "B1", "pubdate": 1700000150, "duration": 11, "pic": ""},
+        {"bvid": "BVbb2", "title": "B2", "pubdate": 1700000250, "duration": 21, "pic": ""},
+    ])
+
+    monkeypatch.setattr(rss, "new_base_path", str(base) + "/")
+    monkeypatch.setattr(rss, "new_rss_path", "new-feed/")
+    monkeypatch.setattr(rss, "RSS_URL_PREFIX", "https://p.example.com/")
+    monkeypatch.setattr(rss, "AUDIO_FORMAT", "m4a")
+    monkeypatch.setattr(rss, "bilibili_link_prefix", "https://www.bilibili.com/video/")
+
+    config = {
+        "season": [],
+        "series": [],
+        "new": [
+            {"uid": "1", "sid": "100", "type": "season"},
+            {"uid": "2", "sid": "200", "type": "season"},
+        ],
+    }
+    rss.generate(config, str(tmp_path))
+
+    out = tmp_path / "rss" / "new.xml"
+    assert out.exists()
+    xml = out.read_text()
+
+    # Title is the user-requested "最新视频合集"
+    assert "<title>最新视频合集</title>" in xml
+    # All 5 items present (2 + 3 = 5)
+    for title in ("A1", "A2", "A3", "B1", "B2"):
+        assert f"<title>{title}</title>" in xml
+    # Channel-level fields come from the first sid (100)
+    assert "<itunes:author>UPnew100</itunes:author>" in xml
+    assert 'enclosure url="https://p.example.com/new-feed/100/BVaa3/BVaa3.m4a"' in xml
+    # Newest-first across sids: BVaa3 (pubdate 1700000300) before BVbb2 (1700000250)
+    assert xml.find("BVaa3") < xml.find("BVbb2")
+
+
+def test_generate_new_caps_each_sid_at_top_n(monkeypatch, tmp_path: Path):
+    """Each sid contributes at most top_n items even if it has more videos."""
+    base = tmp_path / "bilibili-new"
+    videos = [
+        {"bvid": f"BV{i}", "title": f"t{i}", "pubdate": 1700000000 + i, "duration": i, "pic": ""}
+        for i in range(10)
+    ]
+    _setup_new_channel(str(base), "100", videos)
+
+    monkeypatch.setattr(rss, "new_base_path", str(base) + "/")
+    monkeypatch.setattr(rss, "new_rss_path", "new-feed/")
+    monkeypatch.setattr(rss, "RSS_URL_PREFIX", "https://p.example.com/")
+    monkeypatch.setattr(rss, "AUDIO_FORMAT", "m4a")
+    monkeypatch.setattr(rss, "bilibili_link_prefix", "https://www.bilibili.com/video/")
+
+    config = {"season": [], "series": [], "new": [{"uid": "1", "sid": "100", "type": "season"}]}
+    rss.generate(config, str(tmp_path), top_n=5)
+
+    xml = (tmp_path / "rss" / "new.xml").read_text()
+    # Top 5 by pubdate: i=9,8,7,6,5 → BV9,BV8,BV7,BV6,BV5
+    for i in (5, 6, 7, 8, 9):
+        assert f"<title>t{i}</title>" in xml
+    # Excluded: i=0..4
+    for i in (0, 1, 2, 3, 4):
+        assert f"<title>t{i}</title>" not in xml
+
+
+def test_generate_new_skipped_when_array_empty(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(rss, "RSS_URL_PREFIX", "https://p.example.com/")
+    config = {"season": [], "series": [], "new": []}
+    rss.generate(config, str(tmp_path))
+    assert not (tmp_path / "rss" / "new.xml").exists()
+
+
+def test_generate_new_handles_series_kind(monkeypatch, tmp_path: Path):
+    """new array supports series kind; link uses the series bilibili URL."""
+    base = tmp_path / "bilibili-new"
+    _setup_new_channel(str(base), "999", [
+        {"bvid": "BVx", "title": "X", "pubdate": 1700000500, "duration": 1, "pic": ""},
+    ], kind="series")
+
+    monkeypatch.setattr(rss, "new_base_path", str(base) + "/")
+    monkeypatch.setattr(rss, "new_rss_path", "new-feed/")
+    monkeypatch.setattr(rss, "RSS_URL_PREFIX", "https://p.example.com/")
+    monkeypatch.setattr(rss, "AUDIO_FORMAT", "m4a")
+    monkeypatch.setattr(rss, "bilibili_link_prefix", "https://www.bilibili.com/video/")
+
+    config = {"season": [], "series": [], "new": [{"uid": "2", "sid": "999", "type": "series"}]}
+    rss.generate(config, str(tmp_path))
+
+    xml = (tmp_path / "rss" / "new.xml").read_text()
+    assert "<title>最新视频合集</title>" in xml
+    assert "<title>X</title>" in xml
+    assert '<link>https://space.bilibili.com/2/lists/999?type=series</link>' in xml

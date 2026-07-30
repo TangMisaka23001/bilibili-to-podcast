@@ -11,6 +11,8 @@ from bilibili_podcast.config import (
     AUDIO_FORMAT,
     RSS_URL_PREFIX,
     bilibili_link_prefix,
+    new_base_path,
+    new_rss_path,
     season_base_path,
     season_rss_path,
     series_base_path,
@@ -161,7 +163,98 @@ def _series_xml(series: str) -> str:
     return Template(feed_xml_template).substitute({"channel": series_string})
 
 
-def generate(config: dict, output_root: str = "output") -> None:
+def _load_new_videos(sid: str) -> list[dict]:
+    return _load_json(Path(new_base_path) / sid / "videos.json")
+
+
+def _load_new_video_meta(sid: str, bv: str) -> dict:
+    return _load_json(Path(new_base_path) / sid / bv / "meta.json")
+
+
+def _scan_new_items(sids: list[str], top_n: int = 5) -> list[str]:
+    """Merge the top-N newest videos across the given new-sids, return RSS item XML.
+
+    For each sid, take the top_n by videos.json pubdate desc; then merge
+    across all sids and re-sort by pubdate desc so the merged feed is also
+    newest-first.
+    """
+    candidates: list[tuple[int, dict, str]] = []  # (pubdate, video, sid)
+    for sid in sids:
+        videos = _load_new_videos(sid)
+        sorted_videos = sorted(videos, key=lambda v: v.get("pubdate", 0), reverse=True)
+        for v in sorted_videos[:top_n]:
+            candidates.append((v.get("pubdate", 0), v, sid))
+
+    candidates.sort(key=lambda c: c[0], reverse=True)
+
+    items: list[str] = []
+    for pubdate, video, sid in candidates:
+        bv = video["bvid"]
+        video_meta = _load_new_video_meta(sid, bv)
+        audio_path = f"{new_rss_path}{sid}/{bv}/{bv}.{AUDIO_FORMAT}"
+        local_audio = Path("output") / audio_path
+        length = local_audio.stat().st_size if local_audio.exists() else 0
+        items.append(
+            Template(item_template).substitute(
+                {
+                    "title": _xml_escape(video_meta["title"]),
+                    "description": _xml_escape(video_meta["desc"]),
+                    "image": _xml_escape(video_meta["pic"]),
+                    "url": RSS_URL_PREFIX + audio_path,
+                    "duration": video_meta["duration"],
+                    "length": length,
+                    "link": bilibili_link_prefix + bv,
+                    "date": _timestamp_to_date(video_meta["pubdate"]),
+                }
+            )
+        )
+    return items
+
+
+def _new_xml(sids: list[str], uids: list[str], kinds: list[str], top_n: int = 5) -> str:
+    """Build the merged rss/new.xml.
+
+    Channel-level fields (author / image / link) are taken from the first
+    sid; items are merged across all sids.
+    """
+    items = _scan_new_items(sids, top_n=top_n)
+
+    if sids:
+        first_meta = _load_json(Path(new_base_path) / sids[0] / "meta.json")
+        first_kind = kinds[0]
+        first_uid = uids[0]
+        author = first_meta.get("upper", {}).get("name") or "Unknown"
+        title = "最新视频合集"
+        description = title
+        link = (
+            _channel_bilibili_link(first_uid, sids[0])
+            if first_kind == "season"
+            else _series_bilibili_link(first_uid, sids[0])
+        )
+        image = first_meta.get("cover") or first_meta.get("upper", {}).get("face", "")
+    else:
+        author = ""
+        title = "最新视频合集"
+        description = title
+        link = ""
+        image = ""
+
+    channel_string = Template(channel_template).substitute(
+        {
+            "atom_link": f"{RSS_URL_PREFIX}rss/new.xml",
+            "author": _xml_escape(author),
+            "title": _xml_escape(title),
+            "description": _xml_escape(description),
+            "link": link,
+            "category": "",
+            "image": _xml_escape(image),
+            "items": "\n".join(items),
+        }
+    )
+    return Template(feed_xml_template).substitute({"channel": channel_string})
+
+
+def generate(config: dict, output_root: str = "output", top_n: int = 5) -> None:
     Path(output_root, "rss").mkdir(parents=True, exist_ok=True)
 
     for channel in _channel_sid_list_from(config, "season"):
@@ -174,4 +267,13 @@ def generate(config: dict, output_root: str = "output") -> None:
         Path(output_root, "rss", "series").mkdir(parents=True, exist_ok=True)
         out_path = Path(output_root, "rss", "series", f"{series}.xml")
         out_path.write_text(_series_xml(series), encoding="utf-8")
+        logger.info(f"===> wrote {out_path}")
+
+    new_refs = config.get("new", [])
+    if new_refs:
+        sids = [str(c["sid"]) for c in new_refs]
+        uids = [str(c["uid"]) for c in new_refs]
+        kinds = [c["type"] for c in new_refs]
+        out_path = Path(output_root, "rss", "new.xml")
+        out_path.write_text(_new_xml(sids, uids, kinds, top_n=top_n), encoding="utf-8")
         logger.info(f"===> wrote {out_path}")
