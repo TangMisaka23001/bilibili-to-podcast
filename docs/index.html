@@ -30,6 +30,11 @@
   .copy-btn { background: var(--btn-bg); border: none; color: var(--accent); font-size: 0.78em; font-weight: 500; padding: 6px 14px; border-radius: 20px; cursor: pointer; transition: background 0.15s; white-space: nowrap; }
   .copy-btn:hover { background: var(--btn-hover); }
   .copy-btn.copied { color: #34c759; }
+  .card-body .latest { margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(0,0,0,0.06); font-size: 0.82em; color: var(--sub); }
+  @media (prefers-color-scheme: dark) { .card-body .latest { border-top-color: rgba(255,255,255,0.08); } }
+  .card-body .latest-label { font-weight: 500; color: var(--text); margin-bottom: 4px; }
+  .card-body .latest-title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.35; margin-bottom: 4px; color: var(--text); }
+  .card-body .latest-date { font-size: 0.92em; opacity: 0.85; }
   .toast { position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 10px 24px; border-radius: 20px; font-size: 0.88em; opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 100; }
   .toast.show { opacity: 1; }
   @media (max-width: 520px) { .cards { grid-template-columns: repeat(2, 1fr); gap: 12px; } .card-body { padding: 10px 12px; } }
@@ -52,6 +57,7 @@
 <span class="tag season">合集</span>
 <button class="copy-btn" onclick="copyRSS('https://rss.beauty/rss?url=https://podcast.0xcafebabe.dpdns.org/rss/season/7589321.xml',this)">复制链接</button>
 </div>
+<div class="latest"><div class="latest-label">最新一集</div><div class="latest-title">为什么幸福最大化对数学学习者很重要</div><div class="latest-date">2026-05-21</div></div>
 </div>
 </div>
 <div class="card">
@@ -63,6 +69,7 @@
 <span class="tag season">合集</span>
 <button class="copy-btn" onclick="copyRSS('https://rss.beauty/rss?url=https://podcast.0xcafebabe.dpdns.org/rss/season/3866222.xml',this)">复制链接</button>
 </div>
+<div class="latest"><div class="latest-label">最新一集</div><div class="latest-title">【点到为止51】我魔改了经典推理神作｜《X的悲剧》终 幕</div><div class="latest-date">2026-05-09</div></div>
 </div>
 </div>
 <div class="card">
@@ -74,6 +81,7 @@
 <span class="tag season">合集</span>
 <button class="copy-btn" onclick="copyRSS('https://rss.beauty/rss?url=https://podcast.0xcafebabe.dpdns.org/rss/season/1966263.xml',this)">复制链接</button>
 </div>
+<div class="latest"><div class="latest-label">最新一集</div><div class="latest-title">主义的名义51上——《北平无战事》之徒劳无功</div><div class="latest-date">2026-07-19</div></div>
 </div>
 </div>
 <div class="card">
@@ -85,6 +93,7 @@
 <span class="tag season">合集</span>
 <button class="copy-btn" onclick="copyRSS('https://rss.beauty/rss?url=https://podcast.0xcafebabe.dpdns.org/rss/season/1164952.xml',this)">复制链接</button>
 </div>
+<div class="latest"><div class="latest-label">最新一集</div><div class="latest-title">译者精讲《卡拉马佐夫兄弟》：阿廖莎的信仰溃堤与俄国革命者的精神源头|受难者以不义反抗，是否合乎基督教的神圣？ S2E09</div><div class="latest-date">2026-07-23</div></div>
 </div>
 </div>
 <div class="card">
@@ -96,75 +105,19 @@
 <span class="tag season">合集</span>
 <button class="copy-btn" onclick="copyRSS('https://rss.beauty/rss?url=https://podcast.0xcafebabe.dpdns.org/rss/season/5066155.xml',this)">复制链接</button>
 </div>
-</div>
-</div>
-<div class="card">
-<div class="card-cover" onclick="window.open('https://rss.beauty/rss?url=https://podcast.0xcafebabe.dpdns.org/rss/season/3063525.xml')"><img src="https://images.weserv.nl/?url=archive.biliimg.com/bfs/archive/b91eb3cce0b581a20aa16650b8fc149a6293f54c.jpg" alt="" loading="lazy" referrerpolicy="no-referrer"></div>
-<div class="card-body">
-<h2>标普500定投</h2>
-<div class="author">Lazyman_Gold</div>
-<div class="bottom">
-<span class="tag season">合集</span>
-<button class="copy-btn" onclick="copyRSS('https://rss.beauty/rss?url=https://podcast.0xcafebabe.dpdns.org/rss/season/3063525.xml',this)">复制链接</button>
-</div>
-</div>
-</div>
-<div class="card">
-<div class="card-cover" onclick="window.open('https://rss.beauty/rss?url=https://podcast.0xcafebabe.dpdns.org/rss/season/274667.xml')"><img src="https://images.weserv.nl/?url=archive.biliimg.com/bfs/archive/ad1ebd8a1eed3c3b02aa55c44d8a47577eef1c9c.jpg" alt="" loading="lazy" referrerpolicy="no-referrer"></div>
-<div class="card-body">
-<h2>每周经济分析</h2>
-<div class="author">史诗级韭菜</div>
-<div class="bottom">
-<span class="tag season">合集</span>
-<button class="copy-btn" onclick="copyRSS('https://rss.beauty/rss?url=https://podcast.0xcafebabe.dpdns.org/rss/season/274667.xml',this)">复制链接</button>
-</div>
-</div>
-</div>
-<div class="card">
-<div class="card-cover" onclick="window.open('https://rss.beauty/rss?url=https://podcast.0xcafebabe.dpdns.org/rss/season/5888414.xml')"><img src="https://images.weserv.nl/?url=archive.biliimg.com/bfs/archive/552f034333c1e10eea1842486e2ce91d1c9dbb7d.jpg" alt="" loading="lazy" referrerpolicy="no-referrer"></div>
-<div class="card-body">
-<h2>机核视频播客</h2>
-<div class="author">核电波</div>
-<div class="bottom">
-<span class="tag season">合集</span>
-<button class="copy-btn" onclick="copyRSS('https://rss.beauty/rss?url=https://podcast.0xcafebabe.dpdns.org/rss/season/5888414.xml',this)">复制链接</button>
-</div>
-</div>
-</div>
-<div class="card">
-<div class="card-cover" onclick="window.open('https://rss.beauty/rss?url=https://podcast.0xcafebabe.dpdns.org/rss/season/6925530.xml')"><img src="https://images.weserv.nl/?url=archive.biliimg.com/bfs/archive/4a7bc714288f9f914ddb3292d99b1cea1ae3a8ff.jpg" alt="" loading="lazy" referrerpolicy="no-referrer"></div>
-<div class="card-body">
-<h2>通读《极乐迪斯科》！读！！</h2>
-<div class="author">老鱼将吧活</div>
-<div class="bottom">
-<span class="tag season">合集</span>
-<button class="copy-btn" onclick="copyRSS('https://rss.beauty/rss?url=https://podcast.0xcafebabe.dpdns.org/rss/season/6925530.xml',this)">复制链接</button>
-</div>
-</div>
-</div>
-<div class="card">
-<div class="card-cover" onclick="window.open('https://rss.beauty/rss?url=https://podcast.0xcafebabe.dpdns.org/rss/series/4891774.xml')"><svg class="placeholder" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 15v-6l5 3-5 3z"/></svg></div>
-<div class="card-body">
-<h2>WhynotTV播客</h2>
-<div class="author">WhynotTV播客</div>
-<div class="bottom">
-<span class="tag series">系列</span>
-<button class="copy-btn" onclick="copyRSS('https://rss.beauty/rss?url=https://podcast.0xcafebabe.dpdns.org/rss/series/4891774.xml',this)">复制链接</button>
-</div>
+<div class="latest"><div class="latest-label">最新一集</div><div class="latest-title">【不足万字】《火线》报告！系统发现Bug 正在重启中 请稍后 点击此处提交错误报告。感谢您的配合  第一季第十三集精讲13</div><div class="latest-date">2025-05-28</div></div>
 </div>
 </div>
 </div>
 </div>
 <script>
-\
 function copyRSS(url, btn) {
   navigator.clipboard.writeText(url).then(() => {
     btn.textContent = '\u2714 已复制';
     btn.classList.add('copied');
     setTimeout(() => { btn.textContent = '复制链接'; btn.classList.remove('copied'); }, 2000);
   });
-}\
-
+}
 </script>
 </body>
 </html>

@@ -2,6 +2,9 @@ from __future__ import annotations
 
 """b2p-gen-index: generate docs/index.html from config sources."""
 
+import json
+from datetime import datetime, timezone
+
 _IMAGE_PROXY = "https://images.weserv.nl/?url="
 
 
@@ -34,6 +37,8 @@ class _Entry:
     author: str
     cover: str
     link: str
+    latest_title: str = ""
+    latest_date: str = ""
 
 
 def _fetch_meta(sid: str, uid: str, kind: str) -> dict:
@@ -42,7 +47,31 @@ def _fetch_meta(sid: str, uid: str, kind: str) -> dict:
     return asyncio.run(cs.get_meta())
 
 
-def _build_entry(kind: str, sid: str, uid: str, prefix: str) -> _Entry:
+def _load_latest(sid: str, kind: str, output_root: Path = Path("output")) -> tuple[str, str]:
+    """Read the newest video's title + ISO date from local videos.json.
+
+    Returns ("", "") when the file is missing (e.g. fetch hasn't run for this sid).
+    """
+    path = output_root / f"bilibili-{kind}" / sid / "videos.json"
+    if not path.is_file():
+        return "", ""
+    try:
+        videos = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return "", ""
+    if not videos:
+        return "", ""
+    newest = max(videos, key=lambda v: v.get("pubdate", 0))
+    pubdate = newest.get("pubdate", 0)
+    date_str = (
+        datetime.fromtimestamp(pubdate, tz=timezone.utc).strftime("%Y-%m-%d")
+        if pubdate
+        else ""
+    )
+    return newest.get("title", ""), date_str
+
+
+def _build_entry(kind: str, sid: str, uid: str, prefix: str, output_root: Path) -> _Entry:
     meta = _fetch_meta(sid, uid, kind)
     if kind == "season":
         title = meta.get("title") or f"合集 {sid}"
@@ -53,6 +82,7 @@ def _build_entry(kind: str, sid: str, uid: str, prefix: str) -> _Entry:
         author = meta.get("upper", {}).get("name", "") or meta.get("name", "") or f"UP {uid}"
         cover = meta.get("cover", "")
     link = f"https://www.bilibili.com/video/av{sid}" if not uid else ""
+    latest_title, latest_date = _load_latest(sid, kind, output_root)
     return _Entry(
         kind=kind,
         sid=sid,
@@ -60,6 +90,8 @@ def _build_entry(kind: str, sid: str, uid: str, prefix: str) -> _Entry:
         author=author,
         cover=cover,
         link=f"{_RSS_BEAUTY}{prefix}/rss/{kind}/{sid}.xml",
+        latest_title=latest_title,
+        latest_date=latest_date,
     )
 
 
@@ -89,6 +121,11 @@ _CSS = """\
   .copy-btn { background: var(--btn-bg); border: none; color: var(--accent); font-size: 0.78em; font-weight: 500; padding: 6px 14px; border-radius: 20px; cursor: pointer; transition: background 0.15s; white-space: nowrap; }
   .copy-btn:hover { background: var(--btn-hover); }
   .copy-btn.copied { color: #34c759; }
+  .card-body .latest { margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(0,0,0,0.06); font-size: 0.82em; color: var(--sub); }
+  @media (prefers-color-scheme: dark) { .card-body .latest { border-top-color: rgba(255,255,255,0.08); } }
+  .card-body .latest-label { font-weight: 500; color: var(--text); margin-bottom: 4px; }
+  .card-body .latest-title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.35; margin-bottom: 4px; color: var(--text); }
+  .card-body .latest-date { font-size: 0.92em; opacity: 0.85; }
   .toast { position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 10px 24px; border-radius: 20px; font-size: 0.88em; opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 100; }
   .toast.show { opacity: 1; }
   @media (max-width: 520px) { .cards { grid-template-columns: repeat(2, 1fr); gap: 12px; } .card-body { padding: 10px 12px; } }
@@ -96,15 +133,13 @@ _CSS = """\
 
 
 
-_JS = r"""\
-function copyRSS(url, btn) {
+_JS = r"""function copyRSS(url, btn) {
   navigator.clipboard.writeText(url).then(() => {
     btn.textContent = '\u2714 已复制';
     btn.classList.add('copied');
     setTimeout(() => { btn.textContent = '复制链接'; btn.classList.remove('copied'); }, 2000);
   });
-}\
-"""
+}"""
 
 
 def _html(entry_list: list[_Entry]) -> str:
@@ -118,6 +153,11 @@ def _html(entry_list: list[_Entry]) -> str:
 <span class="tag {'season' if e.kind == 'season' else 'series'}">{'合集' if e.kind == 'season' else '系列'}</span>
 <button class="copy-btn" onclick="copyRSS('{e.link}',this)">复制链接</button>
 </div>
+{('<div class="latest">' +
+  '<div class="latest-label">最新一集</div>' +
+  f'<div class="latest-title">{e.latest_title}</div>' +
+  f'<div class="latest-date">{e.latest_date}</div>' +
+  '</div>') if e.latest_title else ''}
 </div>
 </div>"""
         for e in entry_list
@@ -151,17 +191,17 @@ def _html(entry_list: list[_Entry]) -> str:
 """
 
 
-def generate(config_path: str, output: str) -> None:
+def generate(config_path: str, output: str, output_root: str | Path = "output") -> None:
     config = load_active_config(config_path)
     prefix = config["RSS_URL_PREFIX"].rstrip("/")
 
     entries: list[_Entry] = []
     for c in config["season"]:
         sid, uid = str(c["sid"]), str(c["uid"])
-        entries.append(_build_entry("season", sid, uid, prefix))
+        entries.append(_build_entry("season", sid, uid, prefix, Path(output_root)))
     for c in config["series"]:
         sid, uid = str(c["sid"]), str(c["uid"])
-        entries.append(_build_entry("series", sid, uid, prefix))
+        entries.append(_build_entry("series", sid, uid, prefix, Path(output_root)))
 
     Path(output).write_text(_html(entries), encoding="utf-8")
     logger.info(f"===> wrote {output} ({len(entries)} entries)")
@@ -171,8 +211,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Generate docs/index.html from config")
     parser.add_argument("--config", default="config.yaml")
     parser.add_argument("--output", default="docs/index.html")
+    parser.add_argument("--output-root", default="output",
+                        help="Root for reading bilibili-{season|series}/{sid}/videos.json")
     args = parser.parse_args(argv)
-    generate(args.config, args.output)
+    generate(args.config, args.output, output_root=args.output_root)
     return 0
 
 
