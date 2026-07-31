@@ -47,20 +47,20 @@ def _fetch_meta(sid: str, uid: str, kind: str) -> dict:
     return asyncio.run(cs.get_meta())
 
 
-def _load_latest(sid: str, kind: str, output_root: Path = Path("output")) -> tuple[str, str]:
-    """Read the newest video's title + ISO date from local videos.json.
+def _load_latest(sid: str, kind: str, output_root: Path = Path("output")) -> tuple[str, str, str]:
+    """Read the newest video's title + ISO date + cover URL from local videos.json.
 
-    Returns ("", "") when the file is missing (e.g. fetch hasn't run for this sid).
+    Returns ("", "", "") when the file is missing (e.g. fetch hasn't run for this sid).
     """
     path = output_root / f"bilibili-{kind}" / sid / "videos.json"
     if not path.is_file():
-        return "", ""
+        return "", "", ""
     try:
         videos = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return "", ""
+        return "", "", ""
     if not videos:
-        return "", ""
+        return "", "", ""
     newest = max(videos, key=lambda v: v.get("pubdate", 0))
     pubdate = newest.get("pubdate", 0)
     date_str = (
@@ -68,7 +68,42 @@ def _load_latest(sid: str, kind: str, output_root: Path = Path("output")) -> tup
         if pubdate
         else ""
     )
-    return newest.get("title", ""), date_str
+    return newest.get("title", ""), date_str, newest.get("pic", "")
+
+
+def _load_new_global_latest(output_root: Path = Path("output")) -> tuple[str, str, str]:
+    """Across all bilibili-new/{sid}/videos.json, find the single newest video.
+
+    Used by the rss/new.xml banner. Returns ("", "", "") if no new sid has
+    any videos.json (or none has a positive pubdate).
+    """
+    base = output_root / "bilibili-new"
+    if not base.is_dir():
+        return "", "", ""
+    best: tuple[int, dict] | None = None
+    for sid_dir in base.iterdir():
+        if not sid_dir.is_dir():
+            continue
+        path = sid_dir / "videos.json"
+        if not path.is_file():
+            continue
+        try:
+            videos = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        for v in videos:
+            pubdate = v.get("pubdate", 0)
+            if best is None or pubdate > best[0]:
+                best = (pubdate, v)
+    if not best:
+        return "", "", ""
+    pubdate, newest = best
+    date_str = (
+        datetime.fromtimestamp(pubdate, tz=timezone.utc).strftime("%Y-%m-%d")
+        if pubdate
+        else ""
+    )
+    return newest.get("title", ""), date_str, newest.get("pic", "")
 
 
 def _build_entry(kind: str, sid: str, uid: str, prefix: str, output_root: Path) -> _Entry:
@@ -82,7 +117,7 @@ def _build_entry(kind: str, sid: str, uid: str, prefix: str, output_root: Path) 
         author = meta.get("upper", {}).get("name", "") or meta.get("name", "") or f"UP {uid}"
         cover = meta.get("cover", "")
     link = f"https://www.bilibili.com/video/av{sid}" if not uid else ""
-    latest_title, latest_date = _load_latest(sid, kind, output_root)
+    latest_title, latest_date, _ = _load_latest(sid, kind, output_root)
     return _Entry(
         kind=kind,
         sid=sid,
@@ -126,11 +161,13 @@ _CSS = """\
   .card-body .latest-label { font-weight: 500; color: var(--text); margin-bottom: 4px; }
   .card-body .latest-title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.35; margin-bottom: 4px; color: var(--text); }
   .card-body .latest-date { font-size: 0.92em; opacity: 0.85; }
-  .cards > .card.banner { grid-column: 1 / -1; background: linear-gradient(135deg, var(--tag-bg), var(--card-bg)); border: 1px solid rgba(0,0,0,0.04); }
+  .cards > .card.banner { grid-column: 1 / -1; background: linear-gradient(135deg, var(--tag-bg), var(--card-bg)); border: 1px solid rgba(0,0,0,0.04); display: flex; flex-direction: row; }
   @media (prefers-color-scheme: dark) { .cards > .card.banner { border-color: rgba(255,255,255,0.06); } }
-  .card.banner .card-body.banner-body { padding: 18px 24px 16px; }
+  .card.banner > .card-cover { width: 280px; flex-shrink: 0; aspect-ratio: auto; height: 100%; }
+  .card.banner .card-body.banner-body { flex: 1; padding: 18px 24px 16px; min-width: 0; }
   .card.banner .card-body h2 { font-size: 1.1em; -webkit-line-clamp: 1; margin-bottom: 4px; }
   .card.banner .author { font-size: 0.85em; }
+  @media (max-width: 520px) { .card.banner { flex-direction: column; } .card.banner > .card-cover { width: 100%; height: auto; aspect-ratio: 16 / 10; } }
   .card-body .tag.new { background: #34c759; color: #fff; }
   @media (prefers-color-scheme: dark) { .card-body .tag.new { background: #30d158; color: #000; } }
   .toast { position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 10px 24px; border-radius: 20px; font-size: 0.88em; opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 100; }
@@ -149,11 +186,23 @@ _JS = r"""function copyRSS(url, btn) {
 }"""
 
 
-def _banner_html(prefix: str, new_refs: list[dict]) -> str:
-    """Top-of-page banner linking to rss/new.xml, only emitted when new_refs non-empty."""
+def _banner_html(prefix: str, new_refs: list[dict], latest_pic: str = "") -> str:
+    """Top-of-page banner linking to rss/new.xml, only emitted when new_refs non-empty.
+
+    When `latest_pic` is provided (from the cross-sid newest video in
+    bilibili-new/), it is shown as the cover; otherwise the banner renders
+    without a cover image (existing behavior).
+    """
     link = f"{_RSS_BEAUTY}{prefix}/rss/new.xml"
+    cover_html = (
+        f'<div class="card-cover" onclick="window.open(\'{link}\')">'
+        f'<img src="{_proxy_cover(latest_pic)}" alt="" loading="lazy" referrerpolicy="no-referrer">'
+        f'</div>'
+        if latest_pic
+        else ""
+    )
     return f"""<div class="card banner">
-<div class="card-body banner-body">
+{cover_html}<div class="card-body banner-body">
 <h2>最新视频合集</h2>
 <div class="author">B 站新发现合集 / 系列实时更新（每个链接取最近 5 个视频，跨 sid 合并）</div>
 <div class="bottom">
@@ -225,7 +274,15 @@ def generate(config_path: str, output: str, output_root: str | Path = "output") 
         sid, uid = str(c["sid"]), str(c["uid"])
         entries.append(_build_entry("series", sid, uid, prefix, Path(output_root)))
 
-    banner = _banner_html(prefix, config.get("new", [])) if config.get("new") else ""
+    banner = (
+        _banner_html(
+            prefix,
+            config.get("new", []),
+            latest_pic=_load_new_global_latest(Path(output_root))[2],
+        )
+        if config.get("new")
+        else ""
+    )
     Path(output).write_text(_html(entries, banner_html=banner), encoding="utf-8")
     logger.info(f"===> wrote {output} ({len(entries)} entries, banner={'yes' if banner else 'no'})")
 

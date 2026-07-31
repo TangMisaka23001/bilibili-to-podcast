@@ -37,33 +37,35 @@ def _write_videos(base: Path, kind: str, sid: str, videos: list[dict]) -> None:
 
 def test_load_latest_picks_highest_pubdate(tmp_path: Path):
     _write_videos(tmp_path, "season", "100", [
-        {"bvid": "BVaa", "title": "older", "pubdate": 1700000000},
-        {"bvid": "BVbb", "title": "newest", "pubdate": 1700001000},
-        {"bvid": "BVcc", "title": "middle", "pubdate": 1700000500},
+        {"bvid": "BVaa", "title": "older", "pubdate": 1700000000, "pic": "https://i.example.com/aa.jpg"},
+        {"bvid": "BVbb", "title": "newest", "pubdate": 1700001000, "pic": "https://i.example.com/bb.jpg"},
+        {"bvid": "BVcc", "title": "middle", "pubdate": 1700000500, "pic": "https://i.example.com/cc.jpg"},
     ])
 
-    title, date = _load_latest("100", "season", tmp_path)
+    title, date, pic = _load_latest("100", "season", tmp_path)
 
     assert title == "newest"
     assert date == datetime.fromtimestamp(1700001000, tz=timezone.utc).strftime("%Y-%m-%d")
+    assert pic == "https://i.example.com/bb.jpg"
 
 
 def test_load_latest_returns_empty_when_no_videos_json(tmp_path: Path):
-    assert _load_latest("100", "season", tmp_path) == ("", "")
+    assert _load_latest("100", "season", tmp_path) == ("", "", "")
 
 
 def test_load_latest_returns_empty_when_videos_empty(tmp_path: Path):
     _write_videos(tmp_path, "season", "100", [])
-    assert _load_latest("100", "season", tmp_path) == ("", "")
+    assert _load_latest("100", "season", tmp_path) == ("", "", "")
 
 
 def test_load_latest_handles_series_kind(tmp_path: Path):
     _write_videos(tmp_path, "series", "200", [
-        {"bvid": "BV1", "title": "only", "pubdate": 1700002000},
+        {"bvid": "BV1", "title": "only", "pubdate": 1700002000, "pic": "https://i.example.com/x.jpg"},
     ])
-    title, date = _load_latest("200", "series", tmp_path)
+    title, date, pic = _load_latest("200", "series", tmp_path)
     assert title == "only"
     assert date == datetime.fromtimestamp(1700002000, tz=timezone.utc).strftime("%Y-%m-%d")
+    assert pic == "https://i.example.com/x.jpg"
 
 
 # --- _html latest block ---
@@ -113,9 +115,10 @@ def test_load_latest_pubdate_zero_yields_empty_date(tmp_path: Path):
     _write_videos(tmp_path, "season", "100", [
         {"bvid": "BV1", "title": "no date", "pubdate": 0},
     ])
-    title, date = _load_latest("100", "season", tmp_path)
+    title, date, pic = _load_latest("100", "season", tmp_path)
     assert title == "no date"
     assert date == ""
+    assert pic == ""
 
 
 # --- top banner for rss/new.xml ---
@@ -179,6 +182,69 @@ def test_generate_emits_banner_when_new_non_empty(monkeypatch, tmp_path):
     html = out.read_text()
     assert 'class="card banner"' in html
     assert "最新视频合集" in html
+
+
+# --- _load_new_global_latest ---
+
+def test_load_new_global_latest_picks_highest_across_sids(tmp_path: Path):
+    from bilibili_podcast.cli.gen_index import _load_new_global_latest
+    _write_videos(tmp_path, "new", "100", [
+        {"bvid": "BV1", "title": "older", "pubdate": 1700000000, "pic": "https://i.example.com/1.jpg"},
+    ])
+    _write_videos(tmp_path, "new", "200", [
+        {"bvid": "BV2", "title": "middle", "pubdate": 1700000500, "pic": "https://i.example.com/2.jpg"},
+        {"bvid": "BV3", "title": "newest", "pubdate": 1700001000, "pic": "https://i.example.com/3.jpg"},
+    ])
+
+    title, date, pic = _load_new_global_latest(tmp_path)
+    assert title == "newest"
+    assert date == datetime.fromtimestamp(1700001000, tz=timezone.utc).strftime("%Y-%m-%d")
+    assert pic == "https://i.example.com/3.jpg"
+
+
+def test_load_new_global_latest_empty_when_no_new_dir(tmp_path: Path):
+    from bilibili_podcast.cli.gen_index import _load_new_global_latest
+    assert _load_new_global_latest(tmp_path) == ("", "", "")
+
+
+def test_load_new_global_latest_skips_malformed_videos_json(tmp_path: Path):
+    from bilibili_podcast.cli.gen_index import _load_new_global_latest
+    _write_videos(tmp_path, "new", "100", [{"bvid": "BV1", "title": "ok", "pubdate": 100, "pic": "p"}])
+    # Malformed JSON in sid 200 — must not crash; the valid sid 100 still contributes.
+    (tmp_path / "bilibili-new" / "200").mkdir(parents=True)
+    (tmp_path / "bilibili-new" / "200" / "videos.json").write_text("not json", encoding="utf-8")
+
+    title, _, _ = _load_new_global_latest(tmp_path)
+    assert title == "ok"
+
+
+# --- banner cover ---
+
+def test_banner_html_includes_cover_when_pic_provided():
+    from bilibili_podcast.cli.gen_index import _banner_html
+
+    html = _banner_html(
+        "https://p.example.com",
+        [{"uid": "1", "sid": "100", "type": "season"}],
+        latest_pic="https://archive.biliimg.com/bfs/archive/abc.jpg",
+    )
+
+    assert '<div class="card-cover"' in html
+    # Goes through images.weserv.nl proxy to avoid hotlink protection
+    assert "images.weserv.nl/?url=archive.biliimg.com/bfs/archive/abc.jpg" in html
+    # Cover click should open the same rss/new.xml link the copy button uses
+    assert "window.open('https://rss.beauty/rss?url=https://p.example.com/rss/new.xml')" in html
+
+
+def test_banner_html_omits_cover_when_pic_empty():
+    from bilibili_podcast.cli.gen_index import _banner_html
+
+    html = _banner_html(
+        "https://p.example.com",
+        [{"uid": "1", "sid": "100", "type": "season"}],
+        latest_pic="",
+    )
+    assert '<div class="card-cover"' not in html
 
 
 def test_generate_skips_banner_when_new_empty(monkeypatch, tmp_path):

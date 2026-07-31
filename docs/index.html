@@ -35,11 +35,13 @@
   .card-body .latest-label { font-weight: 500; color: var(--text); margin-bottom: 4px; }
   .card-body .latest-title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.35; margin-bottom: 4px; color: var(--text); }
   .card-body .latest-date { font-size: 0.92em; opacity: 0.85; }
-  .cards > .card.banner { grid-column: 1 / -1; background: linear-gradient(135deg, var(--tag-bg), var(--card-bg)); border: 1px solid rgba(0,0,0,0.04); }
+  .cards > .card.banner { grid-column: 1 / -1; background: linear-gradient(135deg, var(--tag-bg), var(--card-bg)); border: 1px solid rgba(0,0,0,0.04); display: flex; flex-direction: row; }
   @media (prefers-color-scheme: dark) { .cards > .card.banner { border-color: rgba(255,255,255,0.06); } }
-  .card.banner .card-body.banner-body { padding: 18px 24px 16px; }
+  .card.banner > .card-cover { width: 280px; flex-shrink: 0; aspect-ratio: auto; height: 100%; }
+  .card.banner .card-body.banner-body { flex: 1; padding: 18px 24px 16px; min-width: 0; }
   .card.banner .card-body h2 { font-size: 1.1em; -webkit-line-clamp: 1; margin-bottom: 4px; }
   .card.banner .author { font-size: 0.85em; }
+  @media (max-width: 520px) { .card.banner { flex-direction: column; } .card.banner > .card-cover { width: 100%; height: auto; aspect-ratio: 16 / 10; } }
   .card-body .tag.new { background: #34c759; color: #fff; }
   @media (prefers-color-scheme: dark) { .card-body .tag.new { background: #30d158; color: #000; } }
   .toast { position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 10px 24px; border-radius: 20px; font-size: 0.88em; opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 100; }
@@ -56,7 +58,7 @@
 </header>
 <div class="cards">
 <div class="card banner">
-<div class="card-body banner-body">
+<div class="card-cover" onclick="window.open('https://rss.beauty/rss?url=https://podcast.0xcafebabe.dpdns.org/rss/new.xml')"><img src="https://images.weserv.nl/?url=i0.hdslb.com/bfs/archive/2c1ef974d05db1b84da39c168ad805329c320199.jpg" alt="" loading="lazy" referrerpolicy="no-referrer"></div><div class="card-body banner-body">
 <h2>最新视频合集</h2>
 <div class="author">B 站新发现合集 / 系列实时更新（每个链接取最近 5 个视频，跨 sid 合并）</div>
 <div class="bottom">
@@ -123,6 +125,30 @@
 <button class="copy-btn" onclick="copyRSS('https://rss.beauty/rss?url=https://podcast.0xcafebabe.dpdns.org/rss/season/5066155.xml',this)">复制链接</button>
 </div>
 <div class="latest"><div class="latest-label">最新一集</div><div class="latest-title">【不足万字】《火线》报告！系统发现Bug 正在重启中 请稍后 点击此处提交错误报告。感谢您的配合  第一季第十三集精讲13</div><div class="latest-date">2025-05-28</div></div>
+</div>
+</div>
+<div class="card">
+<div class="card-cover" onclick="window.open('https://rss.beauty/rss?url=https://podcast.0xcafebabe.dpdns.org/rss/season/6073305.xml')"><img src="https://images.weserv.nl/?url=archive.biliimg.com/bfs/archive/90d03cc3b273e1c17be605976a8e0e6a01ffeaf5.jpg" alt="" loading="lazy" referrerpolicy="no-referrer"></div>
+<div class="card-body">
+<h2>投资闲话</h2>
+<div class="author">吃素的牛筋丸</div>
+<div class="bottom">
+<span class="tag season">合集</span>
+<button class="copy-btn" onclick="copyRSS('https://rss.beauty/rss?url=https://podcast.0xcafebabe.dpdns.org/rss/season/6073305.xml',this)">复制链接</button>
+</div>
+<div class="latest"><div class="latest-label">最新一集</div><div class="latest-title">投资闲话：时局动荡，黑天鹅很多，今年会比较难做</div><div class="latest-date">2026-03-03</div></div>
+</div>
+</div>
+<div class="card">
+<div class="card-cover" onclick="window.open('https://rss.beauty/rss?url=https://podcast.0xcafebabe.dpdns.org/rss/season/8351131.xml')"><img src="https://images.weserv.nl/?url=archive.biliimg.com/bfs/archive/8ca00ad2489e545a44ad02a966a8979930caa9fe.jpg" alt="" loading="lazy" referrerpolicy="no-referrer"></div>
+<div class="card-body">
+<h2>解体诸因</h2>
+<div class="author">-7ero-</div>
+<div class="bottom">
+<span class="tag season">合集</span>
+<button class="copy-btn" onclick="copyRSS('https://rss.beauty/rss?url=https://podcast.0xcafebabe.dpdns.org/rss/season/8351131.xml',this)">复制链接</button>
+</div>
+<div class="latest"><div class="latest-label">最新一集</div><div class="latest-title">分尸的多重动机和多重诡计！？西泽保彦《解体顺路·完》</div><div class="latest-date">2026-06-30</div></div>
 </div>
 </div>
 </div>
