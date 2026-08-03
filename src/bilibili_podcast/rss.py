@@ -171,12 +171,19 @@ def _load_new_video_meta(sid: str, bv: str) -> dict:
     return _load_json(Path(new_base_path) / sid / bv / "meta.json")
 
 
+def _has_complete(sid: str, bv: str, base_path: str) -> bool:
+    """Whether the BV has a `complete` sentinel, meaning fetch succeeded."""
+    return (Path(base_path) / sid / bv / "complete").exists()
+
+
 def _scan_new_items(sids: list[str], top_n: int = 5) -> list[str]:
     """Merge the top-N newest videos across the given new-sids, return RSS item XML.
 
     For each sid, take the top_n by videos.json pubdate desc; then merge
     across all sids and re-sort by pubdate desc so the merged feed is also
-    newest-first.
+    newest-first. BVs without a `complete` sentinel (fetch was interrupted /
+    failed for that BV) are skipped silently — they have no local m4a so
+    emitting an RSS item would point to a 404 on R2.
     """
     candidates: list[tuple[int, dict, str]] = []  # (pubdate, video, sid)
     for sid in sids:
@@ -190,6 +197,11 @@ def _scan_new_items(sids: list[str], top_n: int = 5) -> list[str]:
     items: list[str] = []
     for pubdate, video, sid in candidates:
         bv = video["bvid"]
+        if not _has_complete(sid, bv, new_base_path):
+            logger.warning(
+                f"===> new: skipping {sid}/{bv} (no complete marker, fetch failed)"
+            )
+            continue
         video_meta = _load_new_video_meta(sid, bv)
         audio_path = f"{new_rss_path}{sid}/{bv}/{bv}.{AUDIO_FORMAT}"
         local_audio = Path("output") / audio_path

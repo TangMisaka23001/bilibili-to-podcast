@@ -35,6 +35,7 @@ def _setup_season_channel(base: str, sid: str, videos: list[dict]) -> None:
             "duration": v.get("duration", 0),
             "pubdate": v.get("pubdate", 0),
         })
+        (ch / bv / "complete").touch()
 
 
 def _setup_series_channel(base: str, sid: str, videos: list[dict]) -> None:
@@ -57,6 +58,7 @@ def _setup_series_channel(base: str, sid: str, videos: list[dict]) -> None:
             "duration": v.get("duration", 0),
             "pubdate": v.get("pubdate", 0),
         })
+        (ch / bv / "complete").touch()
 
 
 # --- pure helpers ---
@@ -225,6 +227,7 @@ def _setup_new_channel(base: str, sid: str, videos: list[dict], kind: str = "sea
             "duration": v.get("duration", 0),
             "pubdate": v.get("pubdate", 0),
         })
+        (ch / bv / "complete").touch()
 
 
 def test_generate_new_merges_top_n_across_sids(monkeypatch, tmp_path: Path):
@@ -326,3 +329,30 @@ def test_generate_new_handles_series_kind(monkeypatch, tmp_path: Path):
     assert "<title>最新视频合集</title>" in xml
     assert "<title>X</title>" in xml
     assert '<link>https://space.bilibili.com/2/lists/999?type=series</link>' in xml
+
+
+def test_generate_new_skips_bv_without_complete_marker(monkeypatch, tmp_path: Path):
+    """If a BV appears in videos.json (top-5) but has no `complete` sentinel
+    (fetch was interrupted), the RSS generator must skip it silently instead
+    of crashing on the missing meta.json."""
+    base = tmp_path / "bilibili-new"
+    _setup_new_channel(str(base), "100", [
+        {"bvid": "BVok", "title": "OK", "pubdate": 1700000200, "duration": 1, "pic": ""},
+        {"bvid": "BVbroken", "title": "BROKEN", "pubdate": 1700000300, "duration": 1, "pic": ""},
+    ])
+    # Remove the complete sentinel for the broken BV to simulate fetch failure
+    (base / "100" / "BVbroken" / "complete").unlink()
+
+    monkeypatch.setattr(rss, "new_base_path", str(base) + "/")
+    monkeypatch.setattr(rss, "new_rss_path", "new-feed/")
+    monkeypatch.setattr(rss, "RSS_URL_PREFIX", "https://p.example.com/")
+    monkeypatch.setattr(rss, "AUDIO_FORMAT", "m4a")
+    monkeypatch.setattr(rss, "bilibili_link_prefix", "https://www.bilibili.com/video/")
+
+    config = {"season": [], "series": [], "new": [{"uid": "1", "sid": "100", "type": "season"}]}
+    # Must not raise
+    rss.generate(config, str(tmp_path))
+
+    xml = (tmp_path / "rss" / "new.xml").read_text()
+    assert "<title>OK</title>" in xml
+    assert "<title>BROKEN</title>" not in xml
