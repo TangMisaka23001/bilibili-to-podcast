@@ -14,6 +14,7 @@ from bilibili_podcast.bilibili.channel import (
     _channel_dir,
     fetch_all,
     fetch_one,
+    fetch_video_info_with_fallback,
 )
 
 
@@ -155,3 +156,58 @@ def test_fetch_one_writes_complete_after_downloads(tmp_path: Path):
     complete_idx = calls.index("write_video_complete")
     assert audio_idx < complete_idx
     assert picture_idx < complete_idx
+
+
+# --- fetch_video_info_with_fallback ---
+
+def test_fetch_video_info_with_fallback_returns_api_result_when_api_succeeds(tmp_path: Path):
+    """When the Bilibili API call succeeds, fall back to channel_dir is not used."""
+    api_info = {"bvid": "BV1", "title": "from-api", "pic": "p.jpg", "desc": ""}
+    # Even if a stale videos.json exists with a different title, the API result wins.
+    import json
+    (tmp_path / "videos.json").write_text(
+        json.dumps([{"bvid": "BV1", "title": "from-cache", "pic": "c.jpg"}])
+    )
+
+    with patch("bilibili_podcast.bilibili.channel.fetch_video_info", return_value=api_info):
+        result = fetch_video_info_with_fallback("BV1", tmp_path)
+
+    assert result["title"] == "from-api"
+    assert result["bvid"] == "BV1"
+
+
+def test_fetch_video_info_with_fallback_uses_videos_json_when_api_raises(tmp_path: Path):
+    """When the API raises, return the videos.json record matching the bvid."""
+    import json
+    record = {
+        "bvid": "BV1",
+        "aid": 123,
+        "title": "cached-title",
+        "pic": "http://i1.hdslb.com/bfs/archive/cached.jpg",
+        "duration": 1500,
+        "pubdate": 1700000000,
+    }
+    (tmp_path / "videos.json").write_text(
+        json.dumps([record, {"bvid": "BVother", "title": "other"}])
+    )
+
+    with patch(
+        "bilibili_podcast.bilibili.channel.fetch_video_info",
+        side_effect=RuntimeError("api down"),
+    ):
+        result = fetch_video_info_with_fallback("BV1", tmp_path)
+
+    assert result == record
+
+
+def test_fetch_video_info_with_fallback_raises_when_no_videos_json_record(tmp_path: Path):
+    """If the API fails AND the bvid is not in videos.json, re-raise the API error."""
+    import json
+    (tmp_path / "videos.json").write_text(json.dumps([{"bvid": "BVother"}]))
+
+    with patch(
+        "bilibili_podcast.bilibili.channel.fetch_video_info",
+        side_effect=RuntimeError("api down"),
+    ):
+        with pytest.raises(RuntimeError, match="api down"):
+            fetch_video_info_with_fallback("BVmissing", tmp_path)

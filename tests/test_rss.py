@@ -122,7 +122,65 @@ def test_generate_season_creates_rss_xml(monkeypatch, tmp_path: Path):
     assert "<description>简介 &lt;&gt;&amp;</description>" in xml
 
 
+# --- generate season/series: missing video_meta fields -> empty strings ---
+
+def test_generate_season_tolerates_missing_video_meta_fields(monkeypatch, tmp_path: Path):
+    """If a video's meta.json is missing desc/pic/duration/pubdate/title, RSS still renders with empty values."""
+    base = tmp_path / "bilibili-season"
+    ch = base / "598034"
+    _write_json(ch / "meta.json", {
+        "id": 598034, "mid": 1, "title": "合集 598034", "cover": "x.jpg", "upper": {"name": "UP1"},
+    })
+    _write_json(ch / "videos.json", [{"bvid": "BV1thin"}])
+    # meta.json only has bvid — every other field missing
+    _write_json(ch / "BV1thin" / "meta.json", {"bvid": "BV1thin"})
+    (ch / "BV1thin" / "complete").touch()
+
+    monkeypatch.setattr(rss, "season_base_path", str(base) + "/")
+    monkeypatch.setattr(rss, "season_rss_path", "season/")
+    monkeypatch.setattr(rss, "RSS_URL_PREFIX", "https://podcast.example.com/")
+    monkeypatch.setattr(rss, "AUDIO_FORMAT", "m4a")
+    monkeypatch.setattr(rss, "bilibili_link_prefix", "https://www.bilibili.com/video/")
+
+    rss.generate({"season": [{"uid": "1", "sid": "598034"}]}, str(tmp_path))
+
+    xml = (tmp_path / "rss" / "season" / "598034.xml").read_text()
+    # Should render without raising, with empty values for missing fields
+    assert "<title>BV1thin</title>" in xml
+    assert "<description></description>" in xml
+    assert '<itunes:image href="" />' in xml
+    assert "<itunes:duration>0</itunes:duration>" in xml
+
+
 # --- generate series ---
+
+def test_generate_series_tolerates_missing_video_meta_fields(monkeypatch, tmp_path: Path):
+    """If a series video's meta.json is missing desc/pic/duration/pubdate/title, RSS still renders."""
+    base = tmp_path / "bilibili-series"
+    sid = "4891774"
+    ch = base / sid
+    _write_json(ch / "meta.json", {
+        "series_id": int(sid), "mid": 12345, "name": f"系列 {sid}", "description": "d", "cover": "",
+    })
+    _write_json(ch / "videos.json", [{"bvid": "BV2thin"}])
+    # meta.json only has bvid
+    _write_json(ch / "BV2thin" / "meta.json", {"bvid": "BV2thin"})
+    audio_dir = tmp_path / "output" / "bilibili-series" / sid / "BV2thin"
+    audio_dir.mkdir(parents=True)
+    (audio_dir / "BV2thin.m4a").write_text("fake" * 100)
+
+    monkeypatch.setattr(rss, "series_base_path", str(base) + "/")
+    monkeypatch.setattr(rss, "series_rss_path", "bilibili-series/")
+    monkeypatch.setattr(rss, "RSS_URL_PREFIX", "https://podcast.example.com/")
+    monkeypatch.setattr(rss, "AUDIO_FORMAT", "m4a")
+
+    rss.generate({"series": [{"uid": "2", "sid": sid}]}, str(tmp_path))
+
+    xml = (tmp_path / "rss" / "series" / f"{sid}.xml").read_text()
+    assert "<title>BV2thin</title>" in xml
+    assert "<description></description>" in xml
+    assert "<itunes:duration>0</itunes:duration>" in xml
+
 
 def test_generate_series_creates_rss_xml(monkeypatch, tmp_path: Path):
     base = tmp_path / "bilibili-series"

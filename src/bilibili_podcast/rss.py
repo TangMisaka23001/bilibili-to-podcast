@@ -87,14 +87,14 @@ def _scan_channel_items(channel: str) -> list[str]:
         items.append(
             Template(item_template).substitute(
                 {
-                    "title": _xml_escape(video_meta["title"]),
-                    "description": _xml_escape(video_meta["desc"]),
-                    "image": _xml_escape(video_meta["pic"]),
+                    "title": _xml_escape(video_meta.get("title", bv)),
+                    "description": _xml_escape(video_meta.get("desc", "")),
+                    "image": _xml_escape(video_meta.get("pic", "")),
                     "url": RSS_URL_PREFIX + audio_path,
-                    "duration": video_meta["duration"],
+                    "duration": video_meta.get("duration", 0),
                     "length": 0,
                     "link": bilibili_link_prefix + bv,
-                    "date": _timestamp_to_date(video_meta["pubdate"]),
+                    "date": _timestamp_to_date(video_meta.get("pubdate", 0)),
                 }
             )
         )
@@ -115,14 +115,14 @@ def _scan_series_items(series: str) -> list[str]:
         items.append(
             Template(item_template).substitute(
                 {
-                    "title": _xml_escape(video_meta["title"]),
-                    "description": _xml_escape(video_meta["desc"]),
-                    "image": _xml_escape(video_meta["pic"]),
+                    "title": _xml_escape(video_meta.get("title", bv)),
+                    "description": _xml_escape(video_meta.get("desc", "")),
+                    "image": _xml_escape(video_meta.get("pic", "")),
                     "url": RSS_URL_PREFIX + audio_path,
-                    "duration": video_meta["duration"],
+                    "duration": video_meta.get("duration", 0),
                     "length": length,
                     "link": bilibili_link_prefix + bv,
-                    "date": _timestamp_to_date(video_meta["pubdate"]),
+                    "date": _timestamp_to_date(video_meta.get("pubdate", 0)),
                 }
             )
         )

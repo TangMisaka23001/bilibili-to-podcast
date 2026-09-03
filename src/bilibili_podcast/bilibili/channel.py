@@ -91,6 +91,32 @@ def fetch_video_info(bv: str) -> dict:
     return info
 
 
+def _load_video_record_from_cache(channel_dir: Path, bv: str) -> dict | None:
+    """Find a videos.json record matching `bv` in `channel_dir`."""
+    import json
+
+    videos_path = channel_dir / "videos.json"
+    if not videos_path.exists():
+        return None
+    records = json.loads(videos_path.read_text())
+    for record in records:
+        if record.get("bvid") == bv:
+            return record
+    return None
+
+
+def fetch_video_info_with_fallback(bv: str, channel_dir: Path) -> dict:
+    """Fetch video info, falling back to channel_dir/videos.json on API failure."""
+    try:
+        return fetch_video_info(bv)
+    except Exception as e:
+        cached = _load_video_record_from_cache(channel_dir, bv)
+        if cached is None:
+            raise
+        logger.warning(f"===> api failed for {bv}, using cached videos.json record: {e}")
+        return cached
+
+
 def fetch_one(ref: ChannelRef, output_root: Path) -> None:
     channel_dir = _channel_dir(output_root, ref)
     channel_dir.mkdir(parents=True, exist_ok=True)
@@ -110,7 +136,7 @@ def fetch_one(ref: ChannelRef, output_root: Path) -> None:
         vdir = channel_dir / bv
         vdir.mkdir(parents=True, exist_ok=True)
         try:
-            info = fetch_video_info(bv)
+            info = fetch_video_info_with_fallback(bv, channel_dir)
             write_video_meta(vdir, info)
             download_audio(ref, bv, vdir)
             download_picture(info["pic"], vdir / "pic.jpg")
@@ -157,7 +183,7 @@ def fetch_new(ref: ChannelRef, output_root: Path, top_n: int = 5) -> None:
         vdir = channel_dir / bv
         vdir.mkdir(parents=True, exist_ok=True)
         try:
-            info = fetch_video_info(bv)
+            info = fetch_video_info_with_fallback(bv, channel_dir)
             write_video_meta(vdir, info)
             download_audio(ref, bv, vdir)
             download_picture(info["pic"], vdir / "pic.jpg")
