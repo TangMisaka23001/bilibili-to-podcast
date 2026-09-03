@@ -11,7 +11,7 @@ dependencies = [
     "boto3>=1.43",
     "botocore>=1.43",
     "PyYAML>=6.0",
-    "yt-dlp>=2026.6",
+    "yt-dlp>=2026.8.19",
     "schedule>=1.2",
     "bilibili-api-python @ file:///workspaces/bilibili-to-podcast/vendor/bilibili-api-main",
 ]
