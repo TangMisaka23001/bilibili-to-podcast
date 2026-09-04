@@ -82,7 +82,11 @@ def _scan_channel_items(channel: str) -> list[str]:
     items = []
     for video in _load_season_videos(channel):
         bv = video["bvid"]
-        video_meta = _load_season_video_meta(channel, bv)
+        try:
+            video_meta = _load_season_video_meta(channel, bv)
+        except FileNotFoundError:
+            logger.warning(f"===> season: skipping {channel}/{bv} (meta.json missing)")
+            continue
         audio_path = f"{season_rss_path}{channel}/{bv}/{bv}.{AUDIO_FORMAT}"
         items.append(
             Template(item_template).substitute(
@@ -108,7 +112,11 @@ def _scan_series_items(series: str) -> list[str]:
         video_dir = Path(series_base_path) / series / bv
         if not video_dir.is_dir():
             continue
-        video_meta = _load_series_video_meta(series, bv)
+        try:
+            video_meta = _load_series_video_meta(series, bv)
+        except FileNotFoundError:
+            logger.warning(f"===> series: skipping {series}/{bv} (meta.json missing)")
+            continue
         audio_path = f"{series_rss_path}{series}/{bv}/{bv}.{AUDIO_FORMAT}"
         local_audio = Path("output") / audio_path
         length = local_audio.stat().st_size if local_audio.exists() else 0
@@ -202,21 +210,25 @@ def _scan_new_items(sids: list[str], top_n: int = 5) -> list[str]:
                 f"===> new: skipping {sid}/{bv} (no complete marker, fetch failed)"
             )
             continue
-        video_meta = _load_new_video_meta(sid, bv)
+        try:
+            video_meta = _load_new_video_meta(sid, bv)
+        except FileNotFoundError:
+            logger.warning(f"===> new: skipping {sid}/{bv} (meta.json missing)")
+            continue
         audio_path = f"{new_rss_path}{sid}/{bv}/{bv}.{AUDIO_FORMAT}"
         local_audio = Path("output") / audio_path
         length = local_audio.stat().st_size if local_audio.exists() else 0
         items.append(
             Template(item_template).substitute(
                 {
-                    "title": _xml_escape(video_meta["title"]),
-                    "description": _xml_escape(video_meta["desc"]),
-                    "image": _xml_escape(video_meta["pic"]),
+                    "title": _xml_escape(video_meta.get("title", bv)),
+                    "description": _xml_escape(video_meta.get("desc", "")),
+                    "image": _xml_escape(video_meta.get("pic", "")),
                     "url": RSS_URL_PREFIX + audio_path,
-                    "duration": video_meta["duration"],
+                    "duration": video_meta.get("duration", 0),
                     "length": length,
                     "link": bilibili_link_prefix + bv,
-                    "date": _timestamp_to_date(video_meta["pubdate"]),
+                    "date": _timestamp_to_date(video_meta.get("pubdate", 0)),
                 }
             )
         )
