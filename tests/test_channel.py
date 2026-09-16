@@ -1,10 +1,13 @@
 """Tests for bilibili_podcast.bilibili.channel."""
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from unittest.mock import patch, MagicMock, call
 
 import pytest
+
+from bilibili_api.exceptions import NetworkException
 
 from bilibili_podcast.bilibili.channel import (
     ChannelType,
@@ -12,8 +15,11 @@ from bilibili_podcast.bilibili.channel import (
     _api_type,
     _order,
     _channel_dir,
+    _with_retry,
     fetch_all,
+    fetch_channel_meta,
     fetch_one,
+    fetch_video_info,
     fetch_video_info_with_fallback,
 )
 
@@ -211,3 +217,122 @@ def test_fetch_video_info_with_fallback_raises_when_no_videos_json_record(tmp_pa
     ):
         with pytest.raises(RuntimeError, match="api down"):
             fetch_video_info_with_fallback("BVmissing", tmp_path)
+
+
+def test_fetch_video_info_with_fallback_rejects_incomplete_cache(tmp_path: Path):
+    """A cached record without `pic` cannot stand in for a detail; re-raise."""
+    import json
+    (tmp_path / "videos.json").write_text(
+        json.dumps([{"bvid": "BV1", "title": "cached-title"}])
+    )
+
+    with patch(
+        "bilibili_podcast.bilibili.channel.fetch_video_info",
+        side_effect=RuntimeError("412 risk control"),
+    ):
+        with pytest.raises(RuntimeError, match="412"):
+            fetch_video_info_with_fallback("BV1", tmp_path)
+
+
+# --- credential injection ---
+
+def test_fetch_channel_meta_passes_credential():
+    sentinel = object()
+    captured: dict = {}
+
+    class FakeSeries:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        async def get_meta(self):
+            return {"id": 10}
+
+    with (
+        patch("bilibili_podcast.bilibili.channel.load_credential", return_value=sentinel),
+        patch("bilibili_podcast.bilibili.channel.ChannelSeries", FakeSeries),
+    ):
+        meta = fetch_channel_meta(SEASON_REF)
+
+    assert meta == {"id": 10}
+    assert captured["credential"] is sentinel
+    assert captured["id_"] == "10"
+    assert captured["uid"] == "1"
+
+
+def test_fetch_video_info_passes_credential_and_drops_ugc_season():
+    sentinel = object()
+    seen: dict = {}
+
+    class FakeVideo:
+        def __init__(self, bvid, credential=None):
+            seen["bvid"] = bvid
+            seen["credential"] = credential
+
+        async def get_info(self):
+            return {
+                "bvid": "BV1",
+                "title": "t",
+                "pic": "p.jpg",
+                "ugc_season": {"id": 1},
+            }
+
+    with (
+        patch("bilibili_podcast.bilibili.channel.load_credential", return_value=sentinel),
+        patch("bilibili_podcast.bilibili.channel.video_api.Video", FakeVideo),
+    ):
+        info = fetch_video_info("BV1")
+
+    assert seen == {"bvid": "BV1", "credential": sentinel}
+    assert "ugc_season" not in info
+
+
+# --- risk-control retry ---
+
+def _run(coro):
+    return asyncio.run(coro)
+
+
+def test_with_retry_retries_412_then_succeeds():
+    calls: list[int] = []
+
+    async def call():
+        calls.append(1)
+        if len(calls) < 3:
+            raise NetworkException(412, "Precondition Failed")
+        return "ok"
+
+    async def fake_sleep(_seconds):
+        return None
+
+    assert _run(_with_retry(call, base_delay=0, sleep=fake_sleep)) == "ok"
+    assert len(calls) == 3
+
+
+def test_with_retry_does_not_retry_other_errors():
+    calls: list[int] = []
+
+    async def call():
+        calls.append(1)
+        raise RuntimeError("boom")
+
+    async def fake_sleep(_seconds):
+        return None
+
+    with pytest.raises(RuntimeError, match="boom"):
+        _run(_with_retry(call, sleep=fake_sleep))
+    assert len(calls) == 1
+
+
+def test_with_retry_gives_up_after_attempts():
+    calls: list[int] = []
+
+    async def call():
+        calls.append(1)
+        raise NetworkException(412, "Precondition Failed")
+
+    async def fake_sleep(_seconds):
+        return None
+
+    with pytest.raises(NetworkException):
+        _run(_with_retry(call, attempts=3, base_delay=0, sleep=fake_sleep))
+    assert len(calls) == 3

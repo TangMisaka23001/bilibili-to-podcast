@@ -12,8 +12,10 @@ from bilibili_api.channel_series import (
     ChannelSeries,
     ChannelSeriesType,
 )
+from bilibili_api.exceptions import NetworkException, ResponseCodeException
 
 from bilibili_podcast.bilibili.audio import download_audio, download_picture
+from bilibili_podcast.bilibili.credential import load_credential
 from bilibili_podcast.bilibili.meta import (
     has_video_complete,
     write_channel_meta,
@@ -36,6 +38,65 @@ class ChannelRef:
     type: ChannelType
     uid: str
     sid: str
+
+
+#: Retry policy for risk-control responses (HTTP 412 / API -352).
+RETRY_ATTEMPTS = 3
+RETRY_BASE_DELAY = 1.0
+_RETRYABLE_HTTP_STATUS = frozenset({412, 429})
+_RETRYABLE_API_CODES = frozenset({-352, -412})
+
+#: Fields a cached videos.json record must carry to stand in for a video detail.
+_REQUIRED_VIDEO_FIELDS = ("bvid", "title", "pic")
+
+_credential_warned = False
+
+
+def _warn_if_no_credential() -> None:
+    """Log once if no usable login cookie is configured: the detail API will 412."""
+    global _credential_warned
+    if _credential_warned:
+        return
+    _credential_warned = True
+    cred = load_credential()
+    if cred is None or not cred.sessdata:
+        logger.warning(
+            "===> no SESSDATA in B2P_COOKIE_CONTENT/./cookie; the video detail API "
+            "will return HTTP 412 — re-export a logged-in cookie"
+        )
+
+
+def _is_retryable(exc: Exception) -> bool:
+    if isinstance(exc, NetworkException):
+        return exc.status in _RETRYABLE_HTTP_STATUS
+    if isinstance(exc, ResponseCodeException):
+        return exc.code in _RETRYABLE_API_CODES
+    return False
+
+
+async def _with_retry(call, *, attempts=RETRY_ATTEMPTS, base_delay=RETRY_BASE_DELAY, sleep=asyncio.sleep):
+    """Await ``call()``, retrying risk-control errors with exponential backoff."""
+    for attempt in range(attempts):
+        try:
+            return await call()
+        except Exception as exc:
+            if not _is_retryable(exc):
+                raise
+            if attempt == attempts - 1:
+                logger.error(f"===> risk control persisted after {attempts} attempts: {exc}")
+                raise
+            delay = base_delay * (2**attempt)
+            logger.warning(f"===> risk control, retrying in {delay:.0f}s: {exc}")
+            await sleep(delay)
+
+
+def _make_series(ref: ChannelRef) -> ChannelSeries:
+    return ChannelSeries(
+        id_=ref.sid,
+        uid=ref.uid,
+        type_=_api_type(ref.type),
+        credential=load_credential(),
+    )
 
 
 def _api_type(t: ChannelType) -> ChannelSeriesType:
@@ -63,17 +124,19 @@ def _new_dir(output_root: Path, ref: ChannelRef) -> Path:
 
 
 def fetch_channel_meta(ref: ChannelRef) -> dict:
-    series = ChannelSeries(id_=ref.sid, uid=ref.uid, type_=_api_type(ref.type))
-    return asyncio.run(series.get_meta())
+    series = _make_series(ref)
+    return asyncio.run(_with_retry(series.get_meta))
 
 
 async def _fetch_videos_async(ref: ChannelRef, meta: dict) -> list[dict]:
-    series = ChannelSeries(id_=ref.sid, uid=ref.uid, type_=_api_type(ref.type))
+    series = _make_series(ref)
     pn = 1
     archives: list[dict] = []
     total_key = "media_count" if ref.type == ChannelType.SEASON else "total"
     while True:
-        page = await series.get_videos(sort=_order(ref.type), pn=pn)
+        page = await _with_retry(
+            lambda pn=pn: series.get_videos(sort=_order(ref.type), pn=pn)
+        )
         archives += page["archives"]
         if len(archives) >= meta[total_key]:
             break
@@ -86,7 +149,10 @@ def fetch_videos(ref: ChannelRef, meta: dict) -> list[dict]:
 
 
 def fetch_video_info(bv: str) -> dict:
-    info = asyncio.run(video_api.Video(bvid=bv).get_info())
+    credential = load_credential()
+    info = asyncio.run(
+        _with_retry(lambda: video_api.Video(bvid=bv, credential=credential).get_info())
+    )
     info.pop("ugc_season", None)
     return info
 
@@ -113,6 +179,13 @@ def fetch_video_info_with_fallback(bv: str, channel_dir: Path) -> dict:
         cached = _load_video_record_from_cache(channel_dir, bv)
         if cached is None:
             raise
+        missing = [f for f in _REQUIRED_VIDEO_FIELDS if not cached.get(f)]
+        if missing:
+            logger.warning(
+                f"===> api failed for {bv} and cached videos.json record lacks "
+                f"{missing}, not usable as fallback: {e}"
+            )
+            raise
         logger.warning(f"===> api failed for {bv}, using cached videos.json record: {e}")
         return cached
 
@@ -120,6 +193,7 @@ def fetch_video_info_with_fallback(bv: str, channel_dir: Path) -> dict:
 def fetch_one(ref: ChannelRef, output_root: Path) -> None:
     channel_dir = _channel_dir(output_root, ref)
     channel_dir.mkdir(parents=True, exist_ok=True)
+    _warn_if_no_credential()
 
     meta = fetch_channel_meta(ref)
     write_channel_meta(channel_dir, meta)
@@ -157,6 +231,7 @@ def fetch_new(ref: ChannelRef, output_root: Path, top_n: int = 5) -> None:
 
     channel_dir = _new_dir(output_root, ref)
     channel_dir.mkdir(parents=True, exist_ok=True)
+    _warn_if_no_credential()
 
     meta = fetch_channel_meta(ref)
     write_channel_meta(channel_dir, meta)
