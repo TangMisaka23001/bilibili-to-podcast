@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+import hashlib
 import os
 from unittest.mock import patch, MagicMock
 
 import pytest
+import requests
 import yt_dlp
 
 from bilibili_podcast.bilibili.channel import ChannelRef, ChannelType
@@ -181,6 +183,10 @@ def test_download_audio_raises_when_all_formats_fail():
             return_value=(None, False),
         ),
         patch("bilibili_podcast.bilibili.audio.yt_dlp.YoutubeDL") as mock_ydl,
+        patch(
+            "bilibili_podcast.bilibili.audio._download_via_playurl",
+            side_effect=RuntimeError("no mirror"),
+        ) as mock_fallback,
     ):
         mock_ydl.return_value.__enter__.return_value.download.side_effect = (
             yt_dlp.utils.DownloadError("boom")
@@ -190,6 +196,107 @@ def test_download_audio_raises_when_all_formats_fail():
             download_audio(ref, "BV1xx", video_dir)
 
     assert mock_ydl.call_count == 3
+    mock_fallback.assert_called_once_with("BV1xx", video_dir)
+
+
+def test_download_audio_uses_playurl_mirror_after_ytdlp_fails():
+    ref = ChannelRef(type=ChannelType.SEASON, uid="1", sid="10")
+    video_dir = Path("/tmp/out/10/BV1xx")
+
+    with (
+        patch(
+            "bilibili_podcast.bilibili.audio.materialize_cookie_file",
+            return_value=(None, False),
+        ),
+        patch("bilibili_podcast.bilibili.audio.yt_dlp.YoutubeDL") as mock_ydl,
+        patch(
+            "bilibili_podcast.bilibili.audio._download_via_playurl"
+        ) as mock_fallback,
+    ):
+        mock_ydl.return_value.__enter__.return_value.download.side_effect = (
+            yt_dlp.utils.DownloadError("truncated")
+        )
+        from bilibili_podcast.bilibili.audio import download_audio
+        download_audio(ref, "BV1xx", video_dir)
+
+    mock_fallback.assert_called_once_with("BV1xx", video_dir)
+
+
+def test_download_via_playurl_prefers_official_backup():
+    streams = [{
+        "id": 30216,
+        "bandwidth": 66155,
+        "baseUrl": "https://primary.example/a.m4s",
+        "backupUrl": ["https://backup.example/a.m4s"],
+    }]
+    calls: list[str] = []
+
+    def fake_download(url: str, dest: Path) -> None:
+        calls.append(url)
+
+    from bilibili_podcast.bilibili.audio import _download_via_playurl
+    with (
+        patch("bilibili_podcast.bilibili.audio._audio_streams", return_value=streams),
+        patch("bilibili_podcast.bilibili.audio._download_stream", side_effect=fake_download),
+        patch("bilibili_podcast.bilibili.audio._remux_to_audio"),
+    ):
+        _download_via_playurl("BV1xx", Path("/tmp/out/10/BV1xx"))
+
+    assert calls == ["https://backup.example/a.m4s"]
+
+
+def test_download_stream_resumes_with_range_and_checks_md5(tmp_path: Path):
+    payload = b"0123456789"
+    digest = hashlib.md5(payload).hexdigest()
+    dest = tmp_path / "a.m4s"
+
+    class FakeResponse:
+        def __init__(self, status, headers, chunks, error=None):
+            self.status_code = status
+            self.headers = headers
+            self._chunks = chunks
+            self._error = error
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def raise_for_status(self):
+            return None
+
+        def iter_content(self, size):
+            yield from self._chunks
+            if self._error:
+                raise self._error
+
+    responses = [
+        FakeResponse(
+            200,
+            {"Content-Length": str(len(payload)), "X-Upos-Md5": digest},
+            [payload[:4]],
+            requests.exceptions.ChunkedEncodingError("broken"),
+        ),
+        FakeResponse(
+            206,
+            {"Content-Length": str(len(payload) - 4), "X-Upos-Md5": digest},
+            [payload[4:]],
+        ),
+    ]
+    seen_headers: list[dict] = []
+
+    def fake_get(url, headers, stream, timeout):
+        seen_headers.append(headers)
+        return responses.pop(0)
+
+    from bilibili_podcast.bilibili.audio import _download_stream
+    with patch("bilibili_podcast.bilibili.audio.requests.get", side_effect=fake_get):
+        _download_stream("https://backup.example/a.m4s", dest)
+
+    assert dest.read_bytes() == payload
+    assert "Range" not in seen_headers[0]
+    assert seen_headers[1]["Range"] == "bytes=4-"
 
 
 def test_download_picture_writes_bytes(tmp_path: Path):

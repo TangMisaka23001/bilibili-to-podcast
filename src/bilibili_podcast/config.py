@@ -46,7 +46,13 @@ def _load_global_config():
     try:
         config = load_active_config(config_path)
         logger.info("===> load active config")
-        logger.info(config)
+        # Never log the whole config: it contains R2 credentials.
+        logger.info(
+            "===> season=%d series=%d new=%d",
+            len(config.get("season") or []),
+            len(config.get("series") or []),
+            len(config.get("new") or []),
+        )
     except Exception as e:
         logger.warning(f"===> config not loaded: {e}; using empty defaults")
         config = {}
