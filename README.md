@@ -27,10 +27,19 @@
 
 ### 安装
 
+`vendor/` 中的 `bilibili-api` fork 快照不入库，以根目录的 `vendor.tar.gz` 分发，**首次安装前必须先解压**：
+
 ```bash
+# 1. 解压 vendored 依赖（在仓库根目录执行，会生成 vendor/bilibili-api-main/）
+tar -xzf vendor.tar.gz
+
+# 2. 安装项目
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 ```
+
+`vendor.tar.gz` 解压后的目录结构为 `vendor/bilibili-api-main/`，`pyproject.toml` 中的
+`bilibili-api-python` 依赖直接指向该本地路径，缺了它 `pip install` 会直接失败。
 
 系统依赖：**ffmpeg**（macOS: `brew install ffmpeg`，Linux: `apt install ffmpeg`）
 
@@ -113,6 +122,7 @@ b2p-fetch --help
 ├── pyproject.toml
 ├── sources.json                   # 合集 URL 列表（必填）
 ├── start.sh                       # 一键脚本
+├── vendor.tar.gz                  # vendored bilibili-api，需解压为 vendor/
 ├── docs/
 │   ├── FUNCTIONAL.md
 │   └── compose/specs/
