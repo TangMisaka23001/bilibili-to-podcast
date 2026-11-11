@@ -12,11 +12,14 @@ logger = get_logger()
 
 def _run_pipeline() -> None:
     from bilibili_podcast.cli.fetch import main as fetch_main
+    from bilibili_podcast.cli.gen_index import main as gen_index_main
     from bilibili_podcast.cli.prune import main as prune_main
     from bilibili_podcast.cli.sync import main as sync_main
 
     prune_main([])
     fetch_main([])
+    # index.html must exist before sync mirrors output/ so it lands in the bucket
+    gen_index_main([])
     sync_main([])
 
 

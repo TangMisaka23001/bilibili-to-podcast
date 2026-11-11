@@ -1,22 +1,12 @@
+"""b2p-gen-index: generate output/index.html from config sources."""
+
 from __future__ import annotations
-
-"""b2p-gen-index: generate docs/index.html from config sources."""
-
-import json
-from datetime import datetime, timezone
-
-_IMAGE_PROXY = "https://images.weserv.nl/?url="
-
-
-def _proxy_cover(url: str) -> str:
-    """Rewrite B站 cover URLs through images.weserv.nl to bypass hotlink protection."""
-    if not url:
-        return url
-    return _IMAGE_PROXY + url.replace("https://", "").replace("http://", "")
 
 import argparse
 import asyncio
+import json
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 from bilibili_api.channel_series import ChannelSeries, ChannelSeriesType
@@ -26,7 +16,14 @@ from bilibili_podcast.logger import get_logger
 
 logger = get_logger()
 
-_RSS_BEAUTY = "https://rss.beauty/rss?url="
+_IMAGE_PROXY = "https://images.weserv.nl/?url="
+
+
+def _proxy_cover(url: str) -> str:
+    """Rewrite B站 cover URLs through images.weserv.nl to bypass hotlink protection."""
+    if not url:
+        return url
+    return _IMAGE_PROXY + url.replace("https://", "").replace("http://", "")
 
 
 @dataclass(frozen=True)
@@ -43,7 +40,7 @@ class _Entry:
 
 def _fetch_meta(sid: str, uid: str, kind: str) -> dict:
     stype = ChannelSeriesType.SEASON if kind == "season" else ChannelSeriesType.SERIES
-    cs = ChannelSeries(id_=sid, uid=uid, type_=stype)
+    cs = ChannelSeries(id_=int(sid), uid=int(uid), type_=stype)
     return asyncio.run(cs.get_meta())
 
 
@@ -64,7 +61,7 @@ def _load_latest(sid: str, kind: str, output_root: Path = Path("output")) -> tup
     newest = max(videos, key=lambda v: v.get("pubdate", 0))
     pubdate = newest.get("pubdate", 0)
     date_str = (
-        datetime.fromtimestamp(pubdate, tz=timezone.utc).strftime("%Y-%m-%d")
+        datetime.fromtimestamp(pubdate, tz=UTC).strftime("%Y-%m-%d")
         if pubdate
         else ""
     )
@@ -99,7 +96,7 @@ def _load_new_global_latest(output_root: Path = Path("output")) -> tuple[str, st
         return "", "", ""
     pubdate, newest = best
     date_str = (
-        datetime.fromtimestamp(pubdate, tz=timezone.utc).strftime("%Y-%m-%d")
+        datetime.fromtimestamp(pubdate, tz=UTC).strftime("%Y-%m-%d")
         if pubdate
         else ""
     )
@@ -116,7 +113,6 @@ def _build_entry(kind: str, sid: str, uid: str, prefix: str, output_root: Path) 
         title = meta.get("name") or f"系列 {sid}"
         author = meta.get("upper", {}).get("name", "") or meta.get("name", "") or f"UP {uid}"
         cover = meta.get("cover", "")
-    link = f"https://www.bilibili.com/video/av{sid}" if not uid else ""
     latest_title, latest_date, _ = _load_latest(sid, kind, output_root)
     return _Entry(
         kind=kind,
@@ -124,7 +120,7 @@ def _build_entry(kind: str, sid: str, uid: str, prefix: str, output_root: Path) 
         title=title,
         author=author,
         cover=cover,
-        link=f"{_RSS_BEAUTY}{prefix}/rss/{kind}/{sid}.xml",
+        link=f"{prefix}/rss/{kind}/{sid}.xml",
         latest_title=latest_title,
         latest_date=latest_date,
     )
@@ -193,7 +189,7 @@ def _banner_html(prefix: str, new_refs: list[dict], latest_pic: str = "") -> str
     bilibili-new/), it is shown as the cover; otherwise the banner renders
     without a cover image (existing behavior).
     """
-    link = f"{_RSS_BEAUTY}{prefix}/rss/new.xml"
+    link = f"{prefix}/rss/new.xml"
     cover_html = (
         f'<div class="card-cover" onclick="window.open(\'{link}\')">'
         f'<img src="{_proxy_cover(latest_pic)}" alt="" loading="lazy" referrerpolicy="no-referrer">'
@@ -283,18 +279,27 @@ def generate(config_path: str, output: str, output_root: str | Path = "output") 
         if config.get("new")
         else ""
     )
+    Path(output).parent.mkdir(parents=True, exist_ok=True)
     Path(output).write_text(_html(entries, banner_html=banner), encoding="utf-8")
     logger.info(f"===> wrote {output} ({len(entries)} entries, banner={'yes' if banner else 'no'})")
 
 
+def _default_output(output_root: str) -> Path:
+    """Put index.html inside output/ so `b2p-sync` mirrors it to R2/OSS in the same run."""
+    return Path(output_root) / "index.html"
+
+
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Generate docs/index.html from config")
+    parser = argparse.ArgumentParser(description="Generate the bucket's index.html from config")
     parser.add_argument("--config", default="config.yaml")
-    parser.add_argument("--output", default="docs/index.html")
     parser.add_argument("--output-root", default="output",
-                        help="Root for reading bilibili-{season|series}/{sid}/videos.json")
+                        help="Root for reading bilibili-{season|series}/{sid}/videos.json "
+                             "and the default home of the generated index.html")
+    parser.add_argument("--output", default=None,
+                        help="HTML output path (default: <output-root>/index.html)")
     args = parser.parse_args(argv)
-    generate(args.config, args.output, output_root=args.output_root)
+    output = args.output or str(_default_output(args.output_root))
+    generate(args.config, output, output_root=args.output_root)
     return 0
 
 

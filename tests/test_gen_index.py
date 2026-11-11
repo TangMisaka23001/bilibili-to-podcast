@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from bilibili_podcast.cli.gen_index import (
@@ -45,7 +45,7 @@ def test_load_latest_picks_highest_pubdate(tmp_path: Path):
     title, date, pic = _load_latest("100", "season", tmp_path)
 
     assert title == "newest"
-    assert date == datetime.fromtimestamp(1700001000, tz=timezone.utc).strftime("%Y-%m-%d")
+    assert date == datetime.fromtimestamp(1700001000, tz=UTC).strftime("%Y-%m-%d")
     assert pic == "https://i.example.com/bb.jpg"
 
 
@@ -64,7 +64,7 @@ def test_load_latest_handles_series_kind(tmp_path: Path):
     ])
     title, date, pic = _load_latest("200", "series", tmp_path)
     assert title == "only"
-    assert date == datetime.fromtimestamp(1700002000, tz=timezone.utc).strftime("%Y-%m-%d")
+    assert date == datetime.fromtimestamp(1700002000, tz=UTC).strftime("%Y-%m-%d")
     assert pic == "https://i.example.com/x.jpg"
 
 
@@ -79,7 +79,7 @@ def test_html_includes_latest_block_when_entry_has_latest():
         title="Maki新版认知视频系列",
         author="Maki的完美算术教室",
         cover="https://archive.biliimg.com/bfs/archive/abc.jpg",
-        link="https://rss.beauty/rss?url=https://podcast.0xcafebabe.dpdns.org/rss/season/100.xml",
+        link="https://podcast.0xcafebabe.dpdns.org/rss/season/100.xml",
         latest_title="如何拥有从头再来的勇气",
         latest_date="2026-03-02",
     )
@@ -100,7 +100,7 @@ def test_html_omits_latest_block_when_no_latest_title():
         title="Maki新版认知视频系列",
         author="Maki的完美算术教室",
         cover="",
-        link="https://rss.beauty/rss?url=https://podcast.0xcafebabe.dpdns.org/rss/season/100.xml",
+        link="https://podcast.0xcafebabe.dpdns.org/rss/season/100.xml",
         latest_title="",
         latest_date="",
     )
@@ -131,8 +131,8 @@ def test_banner_html_links_to_rss_new_xml():
     assert 'class="card banner"' in html
     assert "最新视频合集" in html
     assert 'rss/new.xml' in html
-    assert 'href="https://rss.beauty/rss?url=https://podcast.example.com/rss/new.xml"' not in html  # not anchor; we use onclick + copyRSS
-    assert "copyRSS('https://rss.beauty/rss?url=https://podcast.example.com/rss/new.xml',this)" in html
+    assert 'href="https://podcast.example.com/rss/new.xml"' not in html  # not anchor; we use onclick + copyRSS
+    assert "copyRSS('https://podcast.example.com/rss/new.xml',this)" in html
 
 
 def test_html_includes_banner_when_provided():
@@ -140,7 +140,7 @@ def test_html_includes_banner_when_provided():
 
     entry = _Entry(
         kind="season", sid="100", title="t", author="a", cover="",
-        link="https://rss.beauty/rss?url=https://p.example.com/rss/season/100.xml",
+        link="https://p.example.com/rss/season/100.xml",
     )
     banner = '<div class="card banner">BANNER</div>'
     html = _html([entry], banner_html=banner)
@@ -152,7 +152,7 @@ def test_html_omits_banner_when_empty():
 
     entry = _Entry(
         kind="season", sid="100", title="t", author="a", cover="",
-        link="https://rss.beauty/rss?url=https://p.example.com/rss/season/100.xml",
+        link="https://p.example.com/rss/season/100.xml",
     )
     html = _html([entry], banner_html="")
     assert 'class="card banner"' not in html
@@ -198,7 +198,7 @@ def test_load_new_global_latest_picks_highest_across_sids(tmp_path: Path):
 
     title, date, pic = _load_new_global_latest(tmp_path)
     assert title == "newest"
-    assert date == datetime.fromtimestamp(1700001000, tz=timezone.utc).strftime("%Y-%m-%d")
+    assert date == datetime.fromtimestamp(1700001000, tz=UTC).strftime("%Y-%m-%d")
     assert pic == "https://i.example.com/3.jpg"
 
 
@@ -233,7 +233,7 @@ def test_banner_html_includes_cover_when_pic_provided():
     # Goes through images.weserv.nl proxy to avoid hotlink protection
     assert "images.weserv.nl/?url=archive.biliimg.com/bfs/archive/abc.jpg" in html
     # Cover click should open the same rss/new.xml link the copy button uses
-    assert "window.open('https://rss.beauty/rss?url=https://p.example.com/rss/new.xml')" in html
+    assert "window.open('https://p.example.com/rss/new.xml')" in html
 
 
 def test_banner_html_omits_cover_when_pic_empty():
@@ -267,3 +267,28 @@ def test_generate_skips_banner_when_new_empty(monkeypatch, tmp_path):
 
     html = out.read_text()
     assert 'class="card banner"' not in html
+
+
+# --- output location: index.html lives in output/ so b2p-sync uploads it ---
+
+def test_main_defaults_output_into_output_root(monkeypatch, tmp_path):
+    from bilibili_podcast.cli import gen_index as gi
+
+    monkeypatch.setattr(gi, "_fetch_meta", lambda sid, uid, kind: {
+        "id": int(sid), "mid": int(uid), "title": f"title-{sid}", "cover": "",
+        "upper": {"name": f"up-{uid}"},
+    })
+
+    import json
+    (tmp_path / "config.yaml").write_text("RSS_URL_PREFIX: https://p.example.com\n", encoding="utf-8")
+    (tmp_path / "sources.json").write_text(json.dumps({
+        "all": ["https://space.bilibili.com/1/lists/100?type=season"],
+        "new": [],
+    }, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    gi.main(["--config", "config.yaml"])
+
+    out = tmp_path / "output" / "index.html"
+    assert out.is_file()
+    assert "https://p.example.com/rss/season/100.xml" in out.read_text(encoding="utf-8")

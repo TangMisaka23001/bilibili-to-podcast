@@ -20,10 +20,8 @@
 - 🎵 用 `yt-dlp` + `ffmpeg` 抽取 `m4a` 音频（最低码率，文件最小）
 - 🔄 自动翻页拉取合集内全部视频；`complete` 标记跳过已下载，**幂等可重跑**
 - 📻 输出标准 RSS 2.0 + iTunes / Podcast Index namespace，兼容 Apple Podcasts、Pocket Casts 等主流客户端
-- ☁️ 音频 + RSS 都同步到 Cloudflare R2（S3 兼容），挂任意域名即用
-- ⏰ 内置 24h 定时调度，自动拉取新视频、清理残留目录
-- 🤖 GitHub Actions 每日自动同步，无需本地长驻进程
-- 🐳 Docker 镜像自动构建发布到 Docker Hub
+- ☁️ 音频 + RSS + 首页 HTML 都同步到 Cloudflare R2（S3 兼容），挂任意域名即用
+- ⏰ 内置 24h 定时调度，自动拉取新视频、生成 RSS 与首页、清理残留目录
 
 ## 🚀 快速开始
 
@@ -93,8 +91,8 @@ bash start.sh
 b2p-prune                     # 清理不在 sources 中的旧目录
 b2p-fetch                     # 拉取合集元数据 + 抽取音频
 b2p-rss                       # 生成 RSS XML
+b2p-gen-index                 # 生成 output/index.html（桶首页，随 b2p-sync 一起上传）
 b2p-sync                      # 同步到 R2
-b2p-gen-index                 # 生成 R2 桶首页 HTML（可选）
 
 # 定时调度（每 24h 跑一轮）
 b2p-cron
@@ -103,35 +101,10 @@ b2p-cron
 b2p-fetch --help
 ```
 
-### Docker
+### 自动更新
 
-```bash
-docker build -t bilibili-to-podcast .
-docker run -d \
-  --name b2p \
-  -v $(pwd)/sources.json:/app/sources.json:ro \
-  -v $(pwd)/output:/app/output \
-  -e RSS_URL_PREFIX=https://podcast.example.com/ \
-  -e R2_ACCESS_KEY=xxx \
-  -e R2_SECRET_KEY=xxx \
-  -e R2_ENDPOINT_URL=https://<account-id>.r2.cloudflarestorage.com \
-  -e R2_BUCKET_NAME=bilibili-podcast \
-  bilibili-to-podcast
-```
-
-### GitHub Actions 自动同步
-
-仓库自带 [`.github/workflows/sync.yml`](.github/workflows/sync.yml)，每天 UTC 03:00 自动跑一次 `start.sh`。
-
-需要在仓库 **Settings → Secrets and variables → Actions** 添加以下 4 个 Secret：
-
-- `R2_ACCESS_KEY`
-- `R2_SECRET_KEY`
-- `R2_ENDPOINT_URL`
-- `R2_BUCKET_NAME`
-
-`RSS_URL_PREFIX` 和 `PORT` 已在 workflow 文件中硬编码（按需修改）。  
-也可在 GitHub UI 手动触发（Actions → Sync → Run workflow）。
+全流程在本地 / 自有服务器执行：`b2p-cron` 内置 24h 调度，或用系统 cron / systemd timer 定时跑 `bash start.sh`。
+仓库不提供 GitHub Actions 工作流（含早前的 Pages 部署）。
 
 ## 📂 项目结构
 
@@ -140,8 +113,6 @@ docker run -d \
 ├── pyproject.toml
 ├── sources.json                   # 合集 URL 列表（必填）
 ├── start.sh                       # 一键脚本
-├── Dockerfile
-├── .github/workflows/sync.yml     # 每日自动同步
 ├── docs/
 │   ├── FUNCTIONAL.md
 │   └── compose/specs/
@@ -179,6 +150,7 @@ sources.json (合集 URL 列表)
      B 站 API (bilibili-api-python)
           ↓
      output/
+     ├── index.html             # 订阅首页（b2p-gen-index 生成后随 b2p-sync 上传）
      ├── bilibili-season/{sid}/{bvid}/
      │   ├── meta.json          # 合集元信息
      │   ├── videos.json        # 视频列表
@@ -206,20 +178,19 @@ sources.json (合集 URL 列表)
 **Q：能加新的合集吗？**  
 往 `sources.json` 数组里追加一行 URL，重跑 `bash start.sh` 即可。无需重启任何进程。
 
-**Q：CI 跑失败了怎么看日志？**  
-GitHub Actions → Sync 工作流 → 对应 run → 查看日志；`output/` 目录作为 artifact 上传，可下载到本地排查。
+**Q：怎么自动更新？**  
+用 `b2p-cron`（内置 24h 调度）或用系统 cron / systemd timer 定时跑 `bash start.sh`。仓库已不再包含 GitHub Actions 工作流。
 
 ## 🧪 测试
 
 ```bash
 pip install -e ".[dev]"
 pytest
-# 77 passed
+# 139 passed
 ```
 
 ## 📋 TODO
 
-- [ ] Vercel 部署
 - [ ] UP 主全投稿视频
 - [ ] AI 视频总结
 - [ ] 分 P 视频支持

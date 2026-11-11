@@ -327,7 +327,7 @@ schedule.every(24).hours.do(job)   # 改这里
 
 ### 暴露 HTTP 订阅页
 
-`docs/index.html` 是现成的静态入口——直接通过对象存储的 public bucket 暴露即可。如果要自定义样式，可以改成 Vercel / Cloudflare Pages 部署。
+`output/index.html`（由 `b2p-gen-index` 生成，随 `b2p-sync` 一起上传）是现成的静态入口——直接通过对象存储的 public bucket 暴露即可（访问 `https://<你的域名>/index.html`）。如果要自定义样式，可以改成 Vercel / Cloudflare Pages 部署。
 
 ---
 
