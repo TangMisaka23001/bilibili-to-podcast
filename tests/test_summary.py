@@ -279,3 +279,65 @@ def test_normalize_handles_garbage_outline_entries():
 def test_chapter_dataclass_defaults():
     chapter = Chapter(start=5, title="t")
     assert chapter.items == ()
+
+
+# --- 章节内嵌进音频 ---
+
+
+def test_embed_chapters_writes_ffmetadata_and_marker(tmp_path: Path, monkeypatch):
+    from bilibili_podcast.bilibili import summary as mod
+
+    vdir = _video_dir(tmp_path)
+    write_summary(vdir, normalize(RAW_OK, fetched_at="now"), bv="BV1xx")
+    audio = vdir / "BV1xx.m4a"
+    audio.write_bytes(b"fake-audio")
+
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        if cmd[0] == "ffprobe":
+            class R:
+                stdout = "3600.0\n"
+            return R()
+        # ffmpeg：把输出文件造出来，模拟 remux 成功
+        Path(cmd[-1]).write_bytes(b"muxed")
+        class R:
+            stdout = ""
+        return R()
+
+    monkeypatch.setattr(mod.subprocess, "run", fake_run)
+
+    assert mod.embed_chapters(vdir, "BV1xx", "m4a") is True
+    assert (vdir / mod.EMBED_MARKER).is_file()
+    assert audio.read_bytes() == b"muxed"
+    ffmpeg_cmd = next(c for c in calls if c[0] == "ffmpeg")
+    assert "-map_chapters" in ffmpeg_cmd and "copy" in ffmpeg_cmd
+
+    # 幂等：章节没变就不重复 mux
+    assert mod.embed_chapters(vdir, "BV1xx", "m4a") is False
+
+
+def test_embed_chapters_skips_without_audio(tmp_path: Path, monkeypatch):
+    from bilibili_podcast.bilibili import summary as mod
+
+    vdir = _video_dir(tmp_path)
+    write_summary(vdir, normalize(RAW_OK, fetched_at="now"), bv="BV1xx")
+    called: list = []
+    monkeypatch.setattr(mod.subprocess, "run", lambda *a, **k: called.append(a))
+
+    assert mod.embed_chapters(vdir, "BV1xx", "m4a") is False
+    assert called == []
+
+
+def test_embed_chapters_skips_when_no_chapters(tmp_path: Path, monkeypatch):
+    from bilibili_podcast.bilibili import summary as mod
+
+    vdir = _video_dir(tmp_path)
+    write_summary(vdir, Summary(source="none", code=1), bv="BV1xx")
+    (vdir / "BV1xx.m4a").write_bytes(b"audio")
+    called: list = []
+    monkeypatch.setattr(mod.subprocess, "run", lambda *a, **k: called.append(a))
+
+    assert mod.embed_chapters(vdir, "BV1xx", "m4a") is False
+    assert called == []

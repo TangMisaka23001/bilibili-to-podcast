@@ -13,7 +13,12 @@ from pathlib import Path
 from bilibili_api.exceptions import ResponseCodeException
 
 from bilibili_podcast.bilibili.credential import load_credential
-from bilibili_podcast.bilibili.summary import RETRY_AFTER_DAYS, summarize_video
+from bilibili_podcast.bilibili.summary import (
+    RETRY_AFTER_DAYS,
+    embed_chapters,
+    summarize_video,
+)
+from bilibili_podcast.config import AUDIO_FORMAT
 from bilibili_podcast.logger import get_logger
 
 logger = get_logger()
@@ -70,6 +75,9 @@ def main(argv: list[str] | None = None) -> int:
         else:
             if summary is not None and summary.available:
                 available += 1
+                # 章节同时写进音频文件本身：RSS 的 podcast:chapters 只有
+                # iOS/iPadOS 26.2+ 才读，文件内嵌章节所有版本都认。
+                embed_chapters(video_dir, video_dir.name, AUDIO_FORMAT)
         if index < len(video_dirs) - 1:
             time.sleep(args.sleep)
 

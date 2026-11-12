@@ -432,8 +432,9 @@ def test_new_item_uses_ai_summary_and_emits_chapters(monkeypatch, tmp_path: Path
 
     assert "七名登山客被困会吃人洋馆。" in xml
     assert "章节" in xml
-    # Apple 要求 HH:MM:SS 且首章 00:00:00
-    assert "00:00:00 开场" in xml
+    # 小宇宙/Spotify 解析器认的格式：MM:SS，首章 00:00
+    assert "00:00 开场" in xml
+    assert "00:00:00" not in xml
     assert "10:01 第二段" in xml
     # 要点行不带行首时间戳，避免被当成额外章节
     assert "  · 设定介绍" in xml

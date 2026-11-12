@@ -17,7 +17,10 @@ RSS 侧回退到 UP 主自己写的简介。
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
+import subprocess
+import tempfile
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -33,6 +36,8 @@ logger = get_logger()
 
 SUMMARY_FILE = "summary.json"
 CHAPTERS_FILE = "chapters.json"
+#: 内嵌章节完成标记，内容是章节 payload 的 md5——章节变了就重新 mux。
+EMBED_MARKER = "chapters.embedded"
 CHAPTERS_VERSION = "1.2.0"
 
 #: 没取到总结的视频，隔这么多天再试一次（B站可能事后补生成）。
@@ -242,14 +247,97 @@ def load_summary(video_dir: Path) -> Summary | None:
         return None
 
 
+def _ffmetadata(summary: Summary, duration: float) -> str:
+    """生成 ffmpeg 的 FFMETADATA 文本（章节写入 MP4 chapter track）。"""
+    chapters = public_chapters(summary)
+    lines = [";FFMETADATA1"]
+    for index, chapter in enumerate(chapters):
+        start = float(chapter.start)
+        end = float(chapters[index + 1].start) if index + 1 < len(chapters) else duration
+        if end <= start:
+            continue
+        lines += [
+            "[CHAPTER]",
+            "TIMEBASE=1/1000",
+            f"START={int(start * 1000)}",
+            f"END={int(end * 1000)}",
+            f"title={chapter.title}",
+        ]
+    return "\n".join(lines) + "\n"
+
+
+def _audio_duration(path: Path) -> float:
+    """用 ffprobe 取音频时长（秒）；失败返回 0。"""
+    try:
+        out = subprocess.run(
+            [
+                "ffprobe", "-v", "error", "-show_entries", "format=duration",
+                "-of", "csv=p=0", str(path),
+            ],
+            capture_output=True, text=True, timeout=60, check=True,
+        )
+        return float(out.stdout.strip() or 0)
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return 0.0
+
+
+def embed_chapters(video_dir: Path, bv: str, audio_format: str) -> bool:
+    """把章节写进音频文件本身（MP4 chapter track）。
+
+    RSS 的 `<podcast:chapters>` 只有 iOS/iPadOS 26.2+ 才读，文件内嵌章节从
+    2005 年起所有版本都认——这是「别人的播客都能看到时间轴」的原因。
+    只 remux 不重编码，返回 True 表示文件被改写。
+    """
+    audio = video_dir / f"{bv}.{audio_format}"
+    summary = load_summary(video_dir)
+    if summary is None or not summary.chapters or not audio.is_file():
+        return False
+
+    payload = json.dumps(chapters_payload(summary, bv), ensure_ascii=False)
+    marker = video_dir / EMBED_MARKER
+    digest = hashlib.new("md5", payload.encode("utf-8"), usedforsecurity=False).hexdigest()
+    if marker.is_file() and marker.read_text(encoding="utf-8").strip() == digest:
+        return False
+
+    duration = _audio_duration(audio)
+    if duration <= 0:
+        logger.warning(f"===> {bv}: cannot read audio duration, skip chapter embedding")
+        return False
+
+    with tempfile.TemporaryDirectory(prefix="b2p-chapters-") as tmpdir:
+        meta_path = Path(tmpdir) / "chapters.txt"
+        meta_path.write_text(_ffmetadata(summary, duration), encoding="utf-8")
+        out_tmp = audio.with_suffix(".tmp" + audio.suffix)
+        try:
+            subprocess.run(
+                [
+                    "ffmpeg", "-y", "-loglevel", "error",
+                    "-i", str(audio), "-i", str(meta_path),
+                    "-map", "0", "-map_metadata", "1", "-map_chapters", "1",
+                    "-c", "copy", str(out_tmp),
+                ],
+                check=True,
+                timeout=600,
+            )
+            out_tmp.replace(audio)
+        except (OSError, subprocess.SubprocessError) as e:
+            out_tmp.unlink(missing_ok=True)
+            logger.error(f"===> {bv}: failed to embed chapters: {e}")
+            return False
+
+    marker.write_text(digest, encoding="utf-8")
+    logger.info(f"===> {bv}: embedded {len(public_chapters(summary))} chapters into audio")
+    return True
+
+
 def _write_if_changed(path: Path, text: str) -> bool:
     """内容一致就不重写——避免每轮跑出新的 mtime/size 触发 R2 重传。"""
     if path.is_file():
         try:
             if path.read_text(encoding="utf-8") == text:
                 return False
-        except OSError:
-            pass
+        except OSError as e:
+            logger.debug(f"===> cannot read {path} for comparison, rewriting: {e}")
     path.write_text(text, encoding="utf-8")
     return True
 
