@@ -136,3 +136,23 @@ def test_sync_large_files_fall_back_to_size(s3, tmp_path: Path, monkeypatch):
 
     assert result.skipped == ["a/BV1.m4a"]
     assert calls == []
+
+
+def test_chapters_json_gets_podcasting2_content_type(s3, tmp_path: Path):
+    _write(tmp_path, "bilibili-new/1/BV1/chapters.json", b'{"version":"1.2.0","chapters":[]}')
+
+    sync(str(tmp_path), "bucket", s3)
+
+    head = s3.head_object(Bucket="bucket", Key="bilibili-new/1/BV1/chapters.json")
+    assert head["ContentType"] == "application/json+chapters"
+
+
+def test_force_suffix_uploads_even_when_content_identical(s3, tmp_path: Path):
+    body = b'{"version":"1.2.0","chapters":[]}'
+    _write(tmp_path, "bilibili-new/1/BV1/chapters.json", body)
+    s3.put_object(Bucket="bucket", Key="bilibili-new/1/BV1/chapters.json", Body=body)
+
+    result = sync(str(tmp_path), "bucket", s3, force_suffixes=("/chapters.json",))
+
+    assert result.uploaded == ["bilibili-new/1/BV1/chapters.json"]
+    assert result.skipped == []

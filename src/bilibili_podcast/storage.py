@@ -59,7 +59,14 @@ def make_s3_client(
     )
 
 
+#: Podcasting 2.0 要求章节文件用这个 type（不是普通的 application/json）。
+CHAPTERS_KEY_SUFFIX = "/chapters.json"
+CHAPTERS_CONTENT_TYPE = "application/json+chapters"
+
+
 def _content_type(key: str) -> str:
+    if key.endswith(CHAPTERS_KEY_SUFFIX):
+        return CHAPTERS_CONTENT_TYPE
     ext = os.path.splitext(key)[1].lower()
     return _MIME_OVERRIDES.get(ext) or mimetypes.guess_type(key)[0] or "application/octet-stream"
 
@@ -100,7 +107,9 @@ def _list_remote(client, bucket: str) -> dict[str, tuple[int, str]]:
 
 def _md5(path: str) -> str:
     """本地文件 md5 —— 只用于和 S3 单段上传的 ETag 比对，不是安全用途。"""
-    digest = hashlib.md5(usedforsecurity=False)
+    # S3 单段上传的 ETag 定义为 md5，必须用同一算法才能比对；
+    # 这里只做变更检测，不涉及任何安全用途。
+    digest = hashlib.new("md5", usedforsecurity=False)
     try:
         with open(path, "rb") as handle:
             for block in iter(lambda: handle.read(1 << 20), b""):
@@ -162,8 +171,11 @@ def _needs_upload(
     remote: dict[str, tuple[int, str]],
     force_prefixes: tuple[str, ...],
     force_keys: tuple[str, ...],
+    force_suffixes: tuple[str, ...] = (),
 ) -> bool:
     if key in force_keys or _top_dir(key) in force_prefixes:
+        return True
+    if force_suffixes and key.endswith(force_suffixes):
         return True
     if key not in remote:
         return True
@@ -186,13 +198,15 @@ def sync(
     client,
     force_prefixes: tuple[str, ...] = (),
     force_keys: tuple[str, ...] = (),
+    force_suffixes: tuple[str, ...] = (),
 ) -> SyncResult:
     """Mirror local_root to bucket.
 
     ``force_prefixes`` re-uploads every key under those top-level directories;
     ``force_keys`` re-uploads exact keys (e.g. ``index.html``, whose content
-    changes every run but whose size may not). Both exist because
-    list_objects_v2 only exposes size, not content hashes.
+    changes every run but whose size may not); ``force_suffixes`` re-uploads
+    keys by suffix (e.g. ``chapters.json``, so a Content-Type fix reaches
+    objects whose bytes did not change).
     """
     local_sizes = _walk_local_keys(local_root)
     remote = _list_remote(client, bucket_name)
@@ -206,6 +220,7 @@ def sync(
             remote,
             force_prefixes,
             force_keys,
+            force_suffixes,
         )
     )
     to_delete = sorted(set(remote) - set(local_sizes))

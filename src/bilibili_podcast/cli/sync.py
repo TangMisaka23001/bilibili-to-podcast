@@ -10,6 +10,9 @@ from bilibili_podcast.storage import make_s3_client, sync
 #: exposes no content hash, so they must be re-uploaded unconditionally.
 _FORCE_KEYS = ("index.html",)
 _FORCE_PREFIXES = ("rss",)
+#: 章节文件的 Content-Type 必须是 application/json+chapters；靠后缀强制重传，
+#: 让「只改了元数据」的历史对象也能被修正。
+_FORCE_SUFFIXES = ("/chapters.json",)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -27,6 +30,7 @@ def main(argv: list[str] | None = None) -> int:
         client,
         force_prefixes=_FORCE_PREFIXES,
         force_keys=_FORCE_KEYS,
+        force_suffixes=_FORCE_SUFFIXES,
     )
     print(
         f"uploaded={len(result.uploaded)} "
