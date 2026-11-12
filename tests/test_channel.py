@@ -9,13 +9,13 @@ import pytest
 
 from bilibili_api.exceptions import NetworkException
 
+from bilibili_podcast.bilibili.retry import with_retry as _with_retry
 from bilibili_podcast.bilibili.channel import (
     ChannelType,
     ChannelRef,
     _api_type,
     _order,
     _channel_dir,
-    _with_retry,
     fetch_all,
     fetch_channel_meta,
     fetch_one,
@@ -255,8 +255,9 @@ def test_fetch_channel_meta_passes_credential():
 
     assert meta == {"id": 10}
     assert captured["credential"] is sentinel
-    assert captured["id_"] == "10"
-    assert captured["uid"] == "1"
+    # ChannelSeries 的 id_/uid 是 int 形参，ChannelRef 里存的是 str
+    assert captured["id_"] == 10
+    assert captured["uid"] == 1
 
 
 def test_fetch_video_info_passes_credential_and_drops_ugc_season():

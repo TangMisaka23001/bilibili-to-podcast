@@ -11,11 +11,14 @@ corresponding output on the next prune run.
 from __future__ import annotations
 
 import shutil
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable
 
 from bilibili_podcast.config_loader import ConfigError, load_active_config
+from bilibili_podcast.logger import get_logger
+
+logger = get_logger()
 
 
 @dataclass
@@ -55,7 +58,10 @@ def _do_prune(output_root: Path, sids_by_kind: dict[str, set[str]]) -> dict[str,
     for kind in _KINDS:
         names, paths = _scan(output_root, kind, sids_by_kind[kind])
         for p in paths:
-            shutil.rmtree(p)
+            try:
+                shutil.rmtree(p)
+            except OSError as e:
+                logger.warning(f"===> failed to prune {p}: {e}")
         deleted[kind] = names
     return deleted
 
@@ -91,22 +97,17 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     sids_by_kind = _sids(config)
-    deleted_paths: dict[str, list[Path]] = {}
-    deleted_names: dict[str, list[str]] = {}
-    for kind in _KINDS:
-        names, paths = _scan(Path(args.output_root), kind, sids_by_kind[kind])
-        deleted_names[kind] = names
-        deleted_paths[kind] = paths
+    output_root = Path(args.output_root)
 
     if args.dry_run:
         for kind in _KINDS:
-            print(_format_dry_run(kind, deleted_names[kind]))
+            names, _ = _scan(output_root, kind, sids_by_kind[kind])
+            print(_format_dry_run(kind, names))
         return 0
 
+    deleted = _do_prune(output_root, sids_by_kind)
     for kind in _KINDS:
-        for p in deleted_paths[kind]:
-            shutil.rmtree(p)
-        print(f"deleted ({kind}): {deleted_names[kind]}")
+        print(f"deleted ({kind}): {deleted[kind]}")
     return 0
 
 

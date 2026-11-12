@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -103,8 +104,14 @@ def _load_new_global_latest(output_root: Path = Path("output")) -> tuple[str, st
     return newest.get("title", ""), date_str, newest.get("pic", "")
 
 
-def _build_entry(kind: str, sid: str, uid: str, prefix: str, output_root: Path) -> _Entry:
-    meta = _fetch_meta(sid, uid, kind)
+#: Channel metas are one API call each and independent; a small pool keeps
+#: index generation from serialising them.
+_META_WORKERS = 4
+
+
+def _entry_from_meta(
+    kind: str, sid: str, uid: str, meta: dict, prefix: str, output_root: Path
+) -> _Entry:
     if kind == "season":
         title = meta.get("title") or f"合集 {sid}"
         author = meta.get("upper", {}).get("name") or f"UP {uid}"
@@ -258,17 +265,30 @@ def _html(entry_list: list[_Entry], banner_html: str = "") -> str:
 """
 
 
+def _build_entries(
+    specs: list[tuple[str, str, str]], prefix: str, output_root: Path
+) -> list[_Entry]:
+    """Fetch channel metas concurrently, keeping config order."""
+    if not specs:
+        return []
+    with ThreadPoolExecutor(max_workers=_META_WORKERS) as pool:
+        metas = list(pool.map(lambda spec: _fetch_meta(spec[1], spec[2], spec[0]), specs))
+    return [
+        _entry_from_meta(kind, sid, uid, meta, prefix, output_root)
+        for (kind, sid, uid), meta in zip(specs, metas, strict=True)
+    ]
+
+
 def generate(config_path: str, output: str, output_root: str | Path = "output") -> None:
     config = load_active_config(config_path)
     prefix = config["RSS_URL_PREFIX"].rstrip("/")
 
-    entries: list[_Entry] = []
-    for c in config["season"]:
-        sid, uid = str(c["sid"]), str(c["uid"])
-        entries.append(_build_entry("season", sid, uid, prefix, Path(output_root)))
-    for c in config["series"]:
-        sid, uid = str(c["sid"]), str(c["uid"])
-        entries.append(_build_entry("series", sid, uid, prefix, Path(output_root)))
+    specs = [
+        (kind, str(c["sid"]), str(c["uid"]))
+        for kind in ("season", "series")
+        for c in config.get(kind, [])
+    ]
+    entries = _build_entries(specs, prefix, Path(output_root))
 
     banner = (
         _banner_html(

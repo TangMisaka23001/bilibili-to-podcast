@@ -6,6 +6,11 @@ import argparse
 from bilibili_podcast.config_loader import load_active_config
 from bilibili_podcast.storage import make_s3_client, sync
 
+#: Keys whose content changes every run but whose size may not: list_objects_v2
+#: exposes no content hash, so they must be re-uploaded unconditionally.
+_FORCE_KEYS = ("index.html",)
+_FORCE_PREFIXES = ("rss",)
+
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Mirror output/ to R2")
@@ -16,12 +21,22 @@ def main(argv: list[str] | None = None) -> int:
     config = load_active_config(args.config)
     r2 = config["R2"]
     client = make_s3_client(r2["ACCESS_KEY"], r2["SECRET_KEY"], r2["ENDPOINT_URL"])
-    result = sync(args.output_root, r2["BUCKET_NAME"], client, force_prefixes=("rss",))
+    result = sync(
+        args.output_root,
+        r2["BUCKET_NAME"],
+        client,
+        force_prefixes=_FORCE_PREFIXES,
+        force_keys=_FORCE_KEYS,
+    )
     print(
         f"uploaded={len(result.uploaded)} "
         f"deleted={len(result.deleted)} "
-        f"skipped={len(result.skipped)}"
+        f"skipped={len(result.skipped)} "
+        f"failed={len(result.failed)}"
     )
+    if result.failed:
+        print("failed keys: " + ", ".join(result.failed))
+        return 1
     return 0
 
 

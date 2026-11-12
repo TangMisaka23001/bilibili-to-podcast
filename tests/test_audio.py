@@ -9,6 +9,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 import requests
 import yt_dlp
+from yt_dlp.utils import DownloadError
 
 from bilibili_podcast.bilibili.channel import ChannelRef, ChannelType
 
@@ -124,7 +125,7 @@ def test_download_audio_falls_back_to_next_format():
         attempted.append(opts["format"])
         handle = MagicMock()
         if opts["format"] == "worstaudio/worst":
-            handle.__enter__.return_value.download.side_effect = yt_dlp.utils.DownloadError(
+            handle.__enter__.return_value.download.side_effect = DownloadError(
                 "HTTP Error 503"
             )
         return handle
@@ -151,7 +152,7 @@ def test_download_audio_walks_all_fallbacks():
         attempted.append(opts["format"])
         handle = MagicMock()
         if opts["format"] != "bestaudio/best":
-            handle.__enter__.return_value.download.side_effect = yt_dlp.utils.DownloadError(
+            handle.__enter__.return_value.download.side_effect = DownloadError(
                 "HTTP Error 503"
             )
         return handle
@@ -189,10 +190,10 @@ def test_download_audio_raises_when_all_formats_fail():
         ) as mock_fallback,
     ):
         mock_ydl.return_value.__enter__.return_value.download.side_effect = (
-            yt_dlp.utils.DownloadError("boom")
+            DownloadError("boom")
         )
         from bilibili_podcast.bilibili.audio import download_audio
-        with pytest.raises(yt_dlp.utils.DownloadError):
+        with pytest.raises(DownloadError):
             download_audio(ref, "BV1xx", video_dir)
 
     assert mock_ydl.call_count == 3
@@ -214,7 +215,7 @@ def test_download_audio_uses_playurl_mirror_after_ytdlp_fails():
         ) as mock_fallback,
     ):
         mock_ydl.return_value.__enter__.return_value.download.side_effect = (
-            yt_dlp.utils.DownloadError("truncated")
+            DownloadError("truncated")
         )
         from bilibili_podcast.bilibili.audio import download_audio
         download_audio(ref, "BV1xx", video_dir)
@@ -309,4 +310,20 @@ def test_download_picture_writes_bytes(tmp_path: Path):
         download_picture("https://example.com/pic.jpg", dest)
 
     assert dest.read_bytes() == fake_bytes
-    mock_get.assert_called_once_with("https://example.com/pic.jpg", stream=True)
+    # 必须带超时，否则 requests 会无限期挂起
+    assert mock_get.call_args.kwargs["timeout"] == (10, 60)
+
+
+def test_download_picture_refuses_error_page(tmp_path: Path):
+    """403/412 的 HTML 错误页不能被当成 jpg 落盘。"""
+    dest = tmp_path / "pic.jpg"
+
+    with patch("bilibili_podcast.bilibili.audio.requests.get") as mock_get:
+        response = MagicMock(content=b"<html>403</html>")
+        response.raise_for_status.side_effect = requests.HTTPError("403")
+        mock_get.return_value = response
+        from bilibili_podcast.bilibili.audio import download_picture
+        with pytest.raises(requests.HTTPError):
+            download_picture("https://example.com/pic.jpg", dest)
+
+    assert not dest.exists()

@@ -22,7 +22,7 @@ $items
 
 item_template = """<item>
 <title>$title</title>
-<enclosure url="$url" length="$length" type="audio/mpeg"/>
+<enclosure url="$url" length="$length" type="$audio_type"/>
 <description>$description</description>
 <link>$link</link>
 <itunes:duration>$duration</itunes:duration>

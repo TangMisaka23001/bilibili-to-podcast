@@ -16,7 +16,7 @@ from pathlib import Path
 
 from bilibili_api.utils.network import Credential
 
-from bilibili_podcast.config import COOKIE_ENV_VAR
+from bilibili_podcast.config import COOKIE_ENV_VAR as COOKIE_ENV_VAR
 
 COOKIE_FILE_NAME = "cookie"
 

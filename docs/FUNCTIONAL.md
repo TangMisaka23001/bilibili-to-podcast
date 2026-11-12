@@ -48,8 +48,6 @@ python upload_r2.py
 | `PORT` | `PORT` | 当前未使用，预留给未来的 HTTP 服务 |
 | `ACCESS_KEY` / `SECRET_KEY` / `ENDPOINT_URL` / `BUCKET_NAME` | `R2.*` | 给 boto3 客户端用 |
 | `bilibili_link_prefix` | 写死 | 单视频页 URL 前缀 |
-| `season_base_path` / `series_base_path` | 写死 | 本地输出根目录 |
-| `season_rss_path` / `series_rss_path` | 写死 | R2 上的 key 前缀（注意：**没有** `../output/`） |
 | `AUDIO_FORMAT` | 写死 `m4a` | yt_dlp 后处理器输出的容器格式 |
 
 ---
@@ -191,8 +189,8 @@ B 站部分视频需要登录态（大会员、付费内容）。两种方式：
 |---------|---------|
 | `<title>` | `video_meta["title"]` |
 | `<description>` | `video_meta["desc"]`（`&` 转 `&amp;`） |
-| `<enclosure url>` | `RSS_URL_PREFIX + season_rss_path + channel + "/" + bv + "/" + bv + ".m4a"` |
-| `<enclosure length>` | `os.path.getsize("../output/" + audio_path)`——**注意 series 才取真实大小，season 写死 0**（另一个不一致） |
+| `<enclosure url>` | `RSS_URL_PREFIX + <相对 output_root 的路径>`，即桶 key |
+| `<enclosure length>` | 本地音频文件的真实字节数，缺失时为 0 |
 | `<itunes:duration>` | `video_meta["duration"]`（秒） |
 | `<itunes:image>` | `video_meta["pic"]` |
 | `<pubDate>` | `formatdate(video_meta["pubdate"], usegmt=True)` |
@@ -212,12 +210,14 @@ B 站部分视频需要登录态（大会员、付费内容）。两种方式：
 
 ---
 
-## 7. 对象存储（`upload_r2.py` + `file.py`）
+## 7. 对象存储（`storage.py` + `b2p-sync`）
 
 ### boto3 客户端
 
 ```python
-s3_client = boto3.session.Session().client(
+from boto3.session import Session
+
+Session().client(
     service_name="s3",
     aws_access_key_id=ACCESS_KEY,
     aws_secret_access_key=SECRET_KEY,
@@ -225,21 +225,17 @@ s3_client = boto3.session.Session().client(
 )
 ```
 
-### 三个核心函数
+### 核心函数 `sync(local_root, bucket, client, force_prefixes, force_keys)`
 
-| 函数 | 用途 |
+| 行为 | 说明 |
 |------|------|
-| `object_exists(key)` | `head_object`，404 视为不存在 |
-| `get_object(key)` | `get_object`，读取 + `json.loads`，返回 dict |
-| `upload_files(local_folder)` | 递归遍历 `local_folder`，跳过 `videos.json` 的去重检查（强制重传），其余已存在跳过 |
+| 上传 | key 本地有、远端无；或远端 `Size` 与本地不同；或被 force 规则命中 |
+| 跳过 | key 存在且大小一致（`list_objects_v2` 只有 Size，没有内容哈希） |
+| 删除 | 远端有、本地无 |
+| 元数据 | 每次上传都带 `ContentType`（按扩展名）与 `CacheControl`（媒体 `immutable`，文本 `max-age=300`） |
+| 失败 | 单文件失败记录到 `SyncResult.failed`，`b2p-sync` 以非零码退出 |
 
-### 上传流程
-
-```python
-upload_files("../output/rss",                check_exist=False)  # RSS 全量上传
-upload_files("../output/bilibili-season",    check_exist=True)   # 增量上传音频/meta
-upload_files("../output/bilibili-series",    check_exist=True)
-```
+`force_prefixes`（如 `rss`）与 `force_keys`（如 `index.html`）用于内容会变但大小可能不变的小文件——只靠 Size 比对会漏更新。`index.html` 必须逐轮重传，否则桶里永远是第一次生成的那一版。
 
 ### R2 上的目录结构
 

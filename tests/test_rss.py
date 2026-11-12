@@ -1,11 +1,8 @@
 """Tests for bilibili_podcast.rss — RSS XML generation."""
 from __future__ import annotations
-from __future__ import annotations
 
 import json
 from pathlib import Path
-
-import pytest
 
 import bilibili_podcast.rss as rss
 
@@ -99,8 +96,6 @@ def test_generate_season_creates_rss_xml(monkeypatch, tmp_path: Path):
         {"bvid": "BV1bb", "title": "第二集", "desc": "简介2", "pic": "https://i.example.com/2.jpg", "duration": 456, "pubdate": 1700001000},
     ])
 
-    monkeypatch.setattr(rss, "season_base_path", str(base) + "/")
-    monkeypatch.setattr(rss, "season_rss_path", "season/")
     monkeypatch.setattr(rss, "RSS_URL_PREFIX", "https://podcast.example.com/")
     monkeypatch.setattr(rss, "AUDIO_FORMAT", "m4a")
     monkeypatch.setattr(rss, "bilibili_link_prefix", "https://www.bilibili.com/video/")
@@ -116,7 +111,9 @@ def test_generate_season_creates_rss_xml(monkeypatch, tmp_path: Path):
     assert '<itunes:image href="https://i.example.com/598034.jpg" />' in xml
     assert "<title>第一集</title>" in xml
     assert "<title>第二集</title>" in xml
-    assert 'enclosure url="https://podcast.example.com/season/598034/BV1aa/BV1aa.m4a"' in xml
+    assert 'enclosure url="https://podcast.example.com/bilibili-season/598034/BV1aa/BV1aa.m4a"' in xml
+    # enclosure type must match AUDIO_FORMAT (m4a -> audio/mp4), not audio/mpeg
+    assert 'type="audio/mp4"' in xml
     assert "<itunes:duration>123</itunes:duration>" in xml
     # & -> &amp;, < > stay literal in XML text
     assert "<description>简介 &lt;&gt;&amp;</description>" in xml
@@ -136,8 +133,6 @@ def test_generate_season_tolerates_missing_video_meta_fields(monkeypatch, tmp_pa
     _write_json(ch / "BV1thin" / "meta.json", {"bvid": "BV1thin"})
     (ch / "BV1thin" / "complete").touch()
 
-    monkeypatch.setattr(rss, "season_base_path", str(base) + "/")
-    monkeypatch.setattr(rss, "season_rss_path", "season/")
     monkeypatch.setattr(rss, "RSS_URL_PREFIX", "https://podcast.example.com/")
     monkeypatch.setattr(rss, "AUDIO_FORMAT", "m4a")
     monkeypatch.setattr(rss, "bilibili_link_prefix", "https://www.bilibili.com/video/")
@@ -169,8 +164,6 @@ def test_generate_series_tolerates_missing_video_meta_fields(monkeypatch, tmp_pa
     audio_dir.mkdir(parents=True)
     (audio_dir / "BV2thin.m4a").write_text("fake" * 100)
 
-    monkeypatch.setattr(rss, "series_base_path", str(base) + "/")
-    monkeypatch.setattr(rss, "series_rss_path", "bilibili-series/")
     monkeypatch.setattr(rss, "RSS_URL_PREFIX", "https://podcast.example.com/")
     monkeypatch.setattr(rss, "AUDIO_FORMAT", "m4a")
 
@@ -192,8 +185,6 @@ def test_generate_series_creates_rss_xml(monkeypatch, tmp_path: Path):
     audio_dir.mkdir(parents=True)
     (audio_dir / "BV2cc.m4a").write_text("fake-m4a-data" * 500)
 
-    monkeypatch.setattr(rss, "series_base_path", str(base) + "/")
-    monkeypatch.setattr(rss, "series_rss_path", "bilibili-series/")
     monkeypatch.setattr(rss, "RSS_URL_PREFIX", "https://podcast.example.com/")
     monkeypatch.setattr(rss, "AUDIO_FORMAT", "m4a")
 
@@ -229,10 +220,6 @@ def test_generate_both_season_and_series(monkeypatch, tmp_path: Path):
     audio_dir.mkdir(parents=True)
     (audio_dir / "BV4ee.m4a").touch()
 
-    monkeypatch.setattr(rss, "season_base_path", str(sbase) + "/")
-    monkeypatch.setattr(rss, "season_rss_path", "season/")
-    monkeypatch.setattr(rss, "series_base_path", str(xbase) + "/")
-    monkeypatch.setattr(rss, "series_rss_path", "bilibili-series/")
     monkeypatch.setattr(rss, "RSS_URL_PREFIX", "https://p.example.com/")
     monkeypatch.setattr(rss, "AUDIO_FORMAT", "m4a")
 
@@ -301,8 +288,6 @@ def test_generate_new_merges_top_n_across_sids(monkeypatch, tmp_path: Path):
         {"bvid": "BVbb2", "title": "B2", "pubdate": 1700000250, "duration": 21, "pic": ""},
     ])
 
-    monkeypatch.setattr(rss, "new_base_path", str(base) + "/")
-    monkeypatch.setattr(rss, "new_rss_path", "new-feed/")
     monkeypatch.setattr(rss, "RSS_URL_PREFIX", "https://p.example.com/")
     monkeypatch.setattr(rss, "AUDIO_FORMAT", "m4a")
     monkeypatch.setattr(rss, "bilibili_link_prefix", "https://www.bilibili.com/video/")
@@ -328,7 +313,7 @@ def test_generate_new_merges_top_n_across_sids(monkeypatch, tmp_path: Path):
         assert f"<title>{title}</title>" in xml
     # Channel-level fields come from the first sid (100)
     assert "<itunes:author>UPnew100</itunes:author>" in xml
-    assert 'enclosure url="https://p.example.com/new-feed/100/BVaa3/BVaa3.m4a"' in xml
+    assert 'enclosure url="https://p.example.com/bilibili-new/100/BVaa3/BVaa3.m4a"' in xml
     # Newest-first across sids: BVaa3 (pubdate 1700000300) before BVbb2 (1700000250)
     assert xml.find("BVaa3") < xml.find("BVbb2")
 
@@ -342,8 +327,6 @@ def test_generate_new_caps_each_sid_at_top_n(monkeypatch, tmp_path: Path):
     ]
     _setup_new_channel(str(base), "100", videos)
 
-    monkeypatch.setattr(rss, "new_base_path", str(base) + "/")
-    monkeypatch.setattr(rss, "new_rss_path", "new-feed/")
     monkeypatch.setattr(rss, "RSS_URL_PREFIX", "https://p.example.com/")
     monkeypatch.setattr(rss, "AUDIO_FORMAT", "m4a")
     monkeypatch.setattr(rss, "bilibili_link_prefix", "https://www.bilibili.com/video/")
@@ -374,8 +357,6 @@ def test_generate_new_handles_series_kind(monkeypatch, tmp_path: Path):
         {"bvid": "BVx", "title": "X", "pubdate": 1700000500, "duration": 1, "pic": ""},
     ], kind="series")
 
-    monkeypatch.setattr(rss, "new_base_path", str(base) + "/")
-    monkeypatch.setattr(rss, "new_rss_path", "new-feed/")
     monkeypatch.setattr(rss, "RSS_URL_PREFIX", "https://p.example.com/")
     monkeypatch.setattr(rss, "AUDIO_FORMAT", "m4a")
     monkeypatch.setattr(rss, "bilibili_link_prefix", "https://www.bilibili.com/video/")
@@ -401,8 +382,6 @@ def test_generate_new_skips_bv_without_complete_marker(monkeypatch, tmp_path: Pa
     # Remove the complete sentinel for the broken BV to simulate fetch failure
     (base / "100" / "BVbroken" / "complete").unlink()
 
-    monkeypatch.setattr(rss, "new_base_path", str(base) + "/")
-    monkeypatch.setattr(rss, "new_rss_path", "new-feed/")
     monkeypatch.setattr(rss, "RSS_URL_PREFIX", "https://p.example.com/")
     monkeypatch.setattr(rss, "AUDIO_FORMAT", "m4a")
     monkeypatch.setattr(rss, "bilibili_link_prefix", "https://www.bilibili.com/video/")

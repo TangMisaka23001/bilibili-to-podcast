@@ -83,6 +83,7 @@ def test_materialize_cookie_file_returns_none_without_cookie(monkeypatch, tmp_pa
 def test_materialize_cookie_file_writes_temp_from_env(monkeypatch):
     monkeypatch.setenv(cred_mod.COOKIE_ENV_VAR, NETSCAPE)
     path, is_temp = materialize_cookie_file()
+    assert path is not None
     try:
         assert is_temp is True
         assert Path(path).read_text(encoding="utf-8") == NETSCAPE
@@ -98,6 +99,7 @@ def test_materialize_cookie_file_protects_source_cookie(monkeypatch, tmp_path: P
     monkeypatch.delenv(cred_mod.COOKIE_ENV_VAR, raising=False)
 
     path, is_temp = materialize_cookie_file()
+    assert path is not None
     try:
         assert is_temp is True
         assert Path(path) != source

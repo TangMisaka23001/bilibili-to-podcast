@@ -12,7 +12,6 @@ from bilibili_api.channel_series import (
     ChannelSeries,
     ChannelSeriesType,
 )
-from bilibili_api.exceptions import NetworkException, ResponseCodeException
 
 from bilibili_podcast.bilibili.audio import download_audio, download_picture
 from bilibili_podcast.bilibili.credential import load_credential
@@ -23,6 +22,7 @@ from bilibili_podcast.bilibili.meta import (
     write_video_complete,
     write_video_meta,
 )
+from bilibili_podcast.bilibili.retry import with_retry as _with_retry
 from bilibili_podcast.logger import get_logger
 
 logger = get_logger()
@@ -40,14 +40,16 @@ class ChannelRef:
     sid: str
 
 
-#: Retry policy for risk-control responses (HTTP 412 / API -352).
-RETRY_ATTEMPTS = 3
-RETRY_BASE_DELAY = 1.0
-_RETRYABLE_HTTP_STATUS = frozenset({412, 429})
-_RETRYABLE_API_CODES = frozenset({-352, -412})
-
 #: Fields a cached videos.json record must carry to stand in for a video detail.
 _REQUIRED_VIDEO_FIELDS = ("bvid", "title", "pic")
+
+
+def _require_dict(value, what: str) -> dict:
+    """Fail loudly on an unexpected API payload instead of a cryptic TypeError."""
+    if not isinstance(value, dict):
+        raise TypeError(f"unexpected {what} response: {type(value).__name__}")
+    return value
+
 
 _credential_warned = False
 
@@ -66,34 +68,10 @@ def _warn_if_no_credential() -> None:
         )
 
 
-def _is_retryable(exc: Exception) -> bool:
-    if isinstance(exc, NetworkException):
-        return exc.status in _RETRYABLE_HTTP_STATUS
-    if isinstance(exc, ResponseCodeException):
-        return exc.code in _RETRYABLE_API_CODES
-    return False
-
-
-async def _with_retry(call, *, attempts=RETRY_ATTEMPTS, base_delay=RETRY_BASE_DELAY, sleep=asyncio.sleep):
-    """Await ``call()``, retrying risk-control errors with exponential backoff."""
-    for attempt in range(attempts):
-        try:
-            return await call()
-        except Exception as exc:
-            if not _is_retryable(exc):
-                raise
-            if attempt == attempts - 1:
-                logger.error(f"===> risk control persisted after {attempts} attempts: {exc}")
-                raise
-            delay = base_delay * (2**attempt)
-            logger.warning(f"===> risk control, retrying in {delay:.0f}s: {exc}")
-            await sleep(delay)
-
-
 def _make_series(ref: ChannelRef) -> ChannelSeries:
     return ChannelSeries(
-        id_=ref.sid,
-        uid=ref.uid,
+        id_=int(ref.sid),
+        uid=int(ref.uid),
         type_=_api_type(ref.type),
         credential=load_credential(),
     )
@@ -125,7 +103,7 @@ def _new_dir(output_root: Path, ref: ChannelRef) -> Path:
 
 def fetch_channel_meta(ref: ChannelRef) -> dict:
     series = _make_series(ref)
-    return asyncio.run(_with_retry(series.get_meta))
+    return _require_dict(asyncio.run(_with_retry(series.get_meta)), "channel meta")
 
 
 async def _fetch_videos_async(ref: ChannelRef, meta: dict) -> list[dict]:
@@ -134,11 +112,14 @@ async def _fetch_videos_async(ref: ChannelRef, meta: dict) -> list[dict]:
     archives: list[dict] = []
     total_key = "media_count" if ref.type == ChannelType.SEASON else "total"
     while True:
-        page = await _with_retry(
-            lambda pn=pn: series.get_videos(sort=_order(ref.type), pn=pn)
+        page = _require_dict(
+            await _with_retry(
+                lambda pn=pn: series.get_videos(sort=_order(ref.type), pn=pn)
+            ),
+            "video page",
         )
-        archives += page["archives"]
-        if len(archives) >= meta[total_key]:
+        archives += page.get("archives") or []
+        if len(archives) >= int(meta.get(total_key) or 0):
             break
         pn += 1
     return archives
@@ -150,8 +131,11 @@ def fetch_videos(ref: ChannelRef, meta: dict) -> list[dict]:
 
 def fetch_video_info(bv: str) -> dict:
     credential = load_credential()
-    info = asyncio.run(
-        _with_retry(lambda: video_api.Video(bvid=bv, credential=credential).get_info())
+    info = _require_dict(
+        asyncio.run(
+            _with_retry(lambda: video_api.Video(bvid=bv, credential=credential).get_info())
+        ),
+        "video info",
     )
     info.pop("ugc_season", None)
     return info
@@ -164,7 +148,11 @@ def _load_video_record_from_cache(channel_dir: Path, bv: str) -> dict | None:
     videos_path = channel_dir / "videos.json"
     if not videos_path.exists():
         return None
-    records = json.loads(videos_path.read_text())
+    try:
+        records = json.loads(videos_path.read_text())
+    except (OSError, json.JSONDecodeError) as e:
+        logger.warning(f"===> cannot read cached videos.json for {bv}: {e}")
+        return None
     for record in records:
         if record.get("bvid") == bv:
             return record
@@ -190,6 +178,24 @@ def fetch_video_info_with_fallback(bv: str, channel_dir: Path) -> dict:
         return cached
 
 
+def _fetch_video_into(channel_dir: Path, ref: ChannelRef, bv: str, log_prefix: str = "") -> None:
+    """Fetch one BV into ``channel_dir``; a failure skips the BV, never the run."""
+    if has_video_complete(channel_dir, bv):
+        logger.info(f"===> {log_prefix}{bv} complete, skipping")
+        return
+    vdir = channel_dir / bv
+    vdir.mkdir(parents=True, exist_ok=True)
+    try:
+        info = fetch_video_info_with_fallback(bv, channel_dir)
+        write_video_meta(vdir, info)
+        download_audio(ref, bv, vdir)
+        download_picture(info["pic"], vdir / "pic.jpg")
+        write_video_complete(vdir)
+        logger.info(f"===> {log_prefix}finished {bv}")
+    except Exception as e:
+        logger.error(f"===> {log_prefix}failed {bv}: {e}")
+
+
 def fetch_one(ref: ChannelRef, output_root: Path) -> None:
     channel_dir = _channel_dir(output_root, ref)
     channel_dir.mkdir(parents=True, exist_ok=True)
@@ -203,21 +209,7 @@ def fetch_one(ref: ChannelRef, output_root: Path) -> None:
     write_channel_videos(channel_dir, videos)
 
     for video in videos:
-        bv = video["bvid"]
-        if has_video_complete(channel_dir, bv):
-            logger.info(f"===> {bv} complete, skipping")
-            continue
-        vdir = channel_dir / bv
-        vdir.mkdir(parents=True, exist_ok=True)
-        try:
-            info = fetch_video_info_with_fallback(bv, channel_dir)
-            write_video_meta(vdir, info)
-            download_audio(ref, bv, vdir)
-            download_picture(info["pic"], vdir / "pic.jpg")
-            write_video_complete(vdir)
-            logger.info(f"===> finished {bv}")
-        except Exception as e:
-            logger.error(f"===> failed {bv}: {e}")
+        _fetch_video_into(channel_dir, ref, video["bvid"])
 
 
 def fetch_new(ref: ChannelRef, output_root: Path, top_n: int = 5) -> None:
@@ -247,25 +239,15 @@ def fetch_new(ref: ChannelRef, output_root: Path, top_n: int = 5) -> None:
     for entry in sorted(channel_dir.iterdir()):
         if entry.name in top_bvs or not entry.is_dir():
             continue
-        shutil.rmtree(entry)
+        try:
+            shutil.rmtree(entry)
+        except OSError as e:
+            logger.warning(f"===> failed to prune {entry.name}: {e}")
+            continue
         logger.info(f"===> pruned {entry.name} (no longer in top {top_n})")
 
     for video in sorted_videos[:top_n]:
-        bv = video["bvid"]
-        if has_video_complete(channel_dir, bv):
-            logger.info(f"===> new: {bv} complete, skipping")
-            continue
-        vdir = channel_dir / bv
-        vdir.mkdir(parents=True, exist_ok=True)
-        try:
-            info = fetch_video_info_with_fallback(bv, channel_dir)
-            write_video_meta(vdir, info)
-            download_audio(ref, bv, vdir)
-            download_picture(info["pic"], vdir / "pic.jpg")
-            write_video_complete(vdir)
-            logger.info(f"===> new: finished {bv}")
-        except Exception as e:
-            logger.error(f"===> new: failed {bv}: {e}")
+        _fetch_video_into(channel_dir, ref, video["bvid"], log_prefix="new: ")
 
 
 def fetch_all_new(refs: list[ChannelRef], output_root: Path = Path("output"), top_n: int = 5) -> None:

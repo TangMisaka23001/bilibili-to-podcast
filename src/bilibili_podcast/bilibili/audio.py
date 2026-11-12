@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 import requests
 import yt_dlp
+from yt_dlp.utils import DownloadError
 from bilibili_api import video as video_api
 
 from bilibili_podcast.bilibili.credential import load_credential, materialize_cookie_file
@@ -177,34 +178,35 @@ def _download_via_playurl(bv: str, video_dir: Path) -> None:
 def download_audio(ref: "ChannelRef", bv: str, video_dir: Path) -> None:
     url = bilibili_link_prefix + bv
     last_error: Exception | None = None
+    cookie_file, is_temporary = materialize_cookie_file()
 
-    for fmt in AUDIO_FORMAT_FALLBACKS:
-        _remove_stale_partials(video_dir, bv)
-        cookie_file, is_temporary = materialize_cookie_file()
-        opts = {
-            "format": fmt,
-            "postprocessors": [
-                {"key": "FFmpegExtractAudio", "preferredcodec": AUDIO_FORMAT}
-            ],
-            "outtmpl": str(video_dir / bv),
-            "cookiefile": cookie_file,
-            "retries": 10,
-            "fragment_retries": 10,
-            "file_access_retries": 3,
-        }
-        try:
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                ydl.download([url])
-            if last_error is not None:
-                logger.warning(f"===> {bv}: succeeded with fallback format {fmt}")
+    try:
+        for fmt in AUDIO_FORMAT_FALLBACKS:
             _remove_stale_partials(video_dir, bv)
-            return
-        except yt_dlp.utils.DownloadError as e:
-            last_error = e
-            logger.warning(f"===> {bv}: format {fmt} failed, trying next: {str(e)[:120]}")
-        finally:
-            if is_temporary and cookie_file:
-                Path(cookie_file).unlink(missing_ok=True)
+            opts = {
+                "format": fmt,
+                "postprocessors": [
+                    {"key": "FFmpegExtractAudio", "preferredcodec": AUDIO_FORMAT}
+                ],
+                "outtmpl": str(video_dir / bv),
+                "cookiefile": cookie_file,
+                "retries": 10,
+                "fragment_retries": 10,
+                "file_access_retries": 3,
+            }
+            try:
+                with yt_dlp.YoutubeDL(opts) as ydl:  # pyright: ignore[reportArgumentType]
+                    ydl.download([url])
+                if last_error is not None:
+                    logger.warning(f"===> {bv}: succeeded with fallback format {fmt}")
+                _remove_stale_partials(video_dir, bv)
+                return
+            except DownloadError as e:
+                last_error = e
+                logger.warning(f"===> {bv}: format {fmt} failed, trying next: {str(e)[:120]}")
+    finally:
+        if is_temporary and cookie_file:
+            Path(cookie_file).unlink(missing_ok=True)
 
     logger.warning(f"===> {bv}: all yt-dlp formats failed, trying playurl mirrors")
     try:
@@ -217,5 +219,7 @@ def download_audio(ref: "ChannelRef", bv: str, video_dir: Path) -> None:
 
 
 def download_picture(pic_url: str, dest: Path) -> None:
-    response = requests.get(pic_url, stream=True)
+    """Download a cover image; fails loudly rather than saving an error page."""
+    response = requests.get(pic_url, headers=_CDN_HEADERS, timeout=(10, 60))
+    response.raise_for_status()
     dest.write_bytes(response.content)

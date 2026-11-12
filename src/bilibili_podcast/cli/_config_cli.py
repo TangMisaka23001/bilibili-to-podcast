@@ -1,6 +1,6 @@
-import io
 import sys
 from pathlib import Path
+from typing import TextIO
 
 import yaml
 
@@ -14,7 +14,11 @@ EXIT_TYPE = 3
 EXIT_CONFLICT = 4
 
 
-def main(argv: list[str], stdout: io.StringIO | None = None, stderr: io.StringIO | None = None) -> int:
+def main(
+    argv: list[str],
+    stdout: TextIO | None = None,
+    stderr: TextIO | None = None,
+) -> int:
     stdout = stdout or sys.stdout
     stderr = stderr or sys.stderr
 

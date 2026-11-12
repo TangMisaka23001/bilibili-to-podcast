@@ -1,8 +1,12 @@
-"""RSS XML generation for podcast clients."""
+"""RSS XML generation for podcast clients.
+
+Every path derives from one ``output_root``: a file's bucket key is exactly its
+path relative to that root, so the public URL is ``RSS_URL_PREFIX + <rel path>``.
+Keeping that invariant in one place is why this module has no path constants.
+"""
 from __future__ import annotations
 
 import json
-import os
 from email.utils import formatdate
 from pathlib import Path
 from string import Template
@@ -11,12 +15,6 @@ from bilibili_podcast.config import (
     AUDIO_FORMAT,
     RSS_URL_PREFIX,
     bilibili_link_prefix,
-    new_base_path,
-    new_rss_path,
-    season_base_path,
-    season_rss_path,
-    series_base_path,
-    series_rss_path,
 )
 from bilibili_podcast.logger import get_logger
 from bilibili_podcast.xml_template import (
@@ -27,33 +25,65 @@ from bilibili_podcast.xml_template import (
 
 logger = get_logger()
 
+#: Directory name per feed kind. The same string is the R2 key prefix.
+_KIND_DIR = {
+    "season": "bilibili-season",
+    "series": "bilibili-series",
+    "new": "bilibili-new",
+}
+
+#: Container -> MIME type for ``<enclosure type>``. A wrong value makes some
+#: clients hand the file to the wrong demuxer, so it must follow AUDIO_FORMAT.
+_AUDIO_MIME = {
+    "m4a": "audio/mp4",
+    "mp3": "audio/mpeg",
+    "opus": "audio/ogg",
+    "flac": "audio/flac",
+}
+
+
+def _audio_mime() -> str:
+    return _AUDIO_MIME.get(AUDIO_FORMAT.lower(), "application/octet-stream")
+
 
 def _channel_sid_list_from(config: dict, kind: str) -> list[str]:
     return [str(c["sid"]) for c in config.get(kind, [])]
 
 
-def _channel_dir(kind: str, sid: str) -> str:
-    return (Path(season_base_path) if kind == "season" else Path(series_base_path)) / sid
+def _channel_dir(root: Path, kind: str, sid: str) -> Path:
+    return root / _KIND_DIR[kind] / sid
+
+
+def _rel(kind: str, *parts: str) -> str:
+    return "/".join((_KIND_DIR[kind], *parts))
 
 
 def _load_json(path: Path) -> dict | list:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _load_season_videos(channel: str) -> list[dict]:
-    return _load_json(Path(season_base_path) / channel / "videos.json")
+def _load_dict(path: Path) -> dict:
+    """Read a JSON object; a wrong shape is a loud error, not a silent skip."""
+    data = _load_json(path)
+    if not isinstance(data, dict):
+        raise ValueError(f"expected a JSON object: {path}")
+    return data
 
 
-def _load_series_videos(series: str) -> list[dict]:
-    return _load_json(Path(series_base_path) / series / "videos.json")
+def _load_list(path: Path) -> list[dict]:
+    """Read a JSON array of objects; a wrong shape is a loud error."""
+    data = _load_json(path)
+    if not isinstance(data, list):
+        raise ValueError(f"expected a JSON array: {path}")
+    return data
 
 
-def _load_season_video_meta(channel: str, bv: str) -> dict:
-    return _load_json(Path(season_base_path) / channel / bv / "meta.json")
+def _load_videos(root: Path, kind: str, sid: str) -> list[dict]:
+    return _load_list(_channel_dir(root, kind, sid) / "videos.json")
 
 
-def _load_series_video_meta(series: str, bv: str) -> dict:
-    return _load_json(Path(series_base_path) / series / bv / "meta.json")
+def _load_video_meta(root: Path, kind: str, sid: str, bv: str) -> dict:
+    return _load_dict(_channel_dir(root, kind, sid) / bv / "meta.json")
 
 
 def _channel_bilibili_link(uid: str, sid: str) -> str:
@@ -78,67 +108,41 @@ def _xml_escape(text: str) -> str:
     )
 
 
-def _scan_channel_items(channel: str) -> list[str]:
-    items = []
-    for video in _load_season_videos(channel):
+def _render_item(root: Path, kind: str, sid: str, bv: str, video_meta: dict) -> str:
+    rel_audio = _rel(kind, sid, bv, f"{bv}.{AUDIO_FORMAT}")
+    local_audio = root / rel_audio
+    length = local_audio.stat().st_size if local_audio.exists() else 0
+    return Template(item_template).substitute(
+        {
+            "title": _xml_escape(video_meta.get("title", bv)),
+            "description": _xml_escape(video_meta.get("desc", "")),
+            "image": _xml_escape(video_meta.get("pic", "")),
+            "url": RSS_URL_PREFIX + rel_audio,
+            "duration": video_meta.get("duration", 0),
+            "length": length,
+            "audio_type": _audio_mime(),
+            "link": bilibili_link_prefix + bv,
+            "date": _timestamp_to_date(video_meta.get("pubdate", 0)),
+        }
+    )
+
+
+def _scan_items(root: Path, kind: str, sid: str) -> list[str]:
+    """Items for one season/series sid, skipping BVs whose meta.json is missing."""
+    items: list[str] = []
+    for video in _load_videos(root, kind, sid):
         bv = video["bvid"]
         try:
-            video_meta = _load_season_video_meta(channel, bv)
+            video_meta = _load_video_meta(root, kind, sid, bv)
         except FileNotFoundError:
-            logger.warning(f"===> season: skipping {channel}/{bv} (meta.json missing)")
+            logger.warning(f"===> {kind}: skipping {sid}/{bv} (meta.json missing)")
             continue
-        audio_path = f"{season_rss_path}{channel}/{bv}/{bv}.{AUDIO_FORMAT}"
-        items.append(
-            Template(item_template).substitute(
-                {
-                    "title": _xml_escape(video_meta.get("title", bv)),
-                    "description": _xml_escape(video_meta.get("desc", "")),
-                    "image": _xml_escape(video_meta.get("pic", "")),
-                    "url": RSS_URL_PREFIX + audio_path,
-                    "duration": video_meta.get("duration", 0),
-                    "length": 0,
-                    "link": bilibili_link_prefix + bv,
-                    "date": _timestamp_to_date(video_meta.get("pubdate", 0)),
-                }
-            )
-        )
+        items.append(_render_item(root, kind, sid, bv, video_meta))
     return items
 
 
-def _scan_series_items(series: str) -> list[str]:
-    items = []
-    for video in _load_series_videos(series):
-        bv = video["bvid"]
-        video_dir = Path(series_base_path) / series / bv
-        if not video_dir.is_dir():
-            continue
-        try:
-            video_meta = _load_series_video_meta(series, bv)
-        except FileNotFoundError:
-            logger.warning(f"===> series: skipping {series}/{bv} (meta.json missing)")
-            continue
-        audio_path = f"{series_rss_path}{series}/{bv}/{bv}.{AUDIO_FORMAT}"
-        local_audio = Path("output") / audio_path
-        length = local_audio.stat().st_size if local_audio.exists() else 0
-        items.append(
-            Template(item_template).substitute(
-                {
-                    "title": _xml_escape(video_meta.get("title", bv)),
-                    "description": _xml_escape(video_meta.get("desc", "")),
-                    "image": _xml_escape(video_meta.get("pic", "")),
-                    "url": RSS_URL_PREFIX + audio_path,
-                    "duration": video_meta.get("duration", 0),
-                    "length": length,
-                    "link": bilibili_link_prefix + bv,
-                    "date": _timestamp_to_date(video_meta.get("pubdate", 0)),
-                }
-            )
-        )
-    return items
-
-
-def _channel_xml(channel: str) -> str:
-    meta = _load_json(Path(season_base_path) / channel / "meta.json")
+def _channel_xml(root: Path, channel: str) -> str:
+    meta = _load_dict(_channel_dir(root, "season", channel) / "meta.json")
     channel_string = Template(channel_template).substitute(
         {
             "atom_link": f"{RSS_URL_PREFIX}rss/{channel}.xml",
@@ -148,14 +152,14 @@ def _channel_xml(channel: str) -> str:
             "link": _channel_bilibili_link(meta["mid"], meta["id"]),
             "category": "",
             "image": _xml_escape(meta["cover"]),
-            "items": "\n".join(_scan_channel_items(channel)),
+            "items": "\n".join(_scan_items(root, "season", channel)),
         }
     )
     return Template(feed_xml_template).substitute({"channel": channel_string})
 
 
-def _series_xml(series: str) -> str:
-    meta = _load_json(Path(series_base_path) / series / "meta.json")
+def _series_xml(root: Path, series: str) -> str:
+    meta = _load_dict(_channel_dir(root, "series", series) / "meta.json")
     series_string = Template(channel_template).substitute(
         {
             "atom_link": f"{RSS_URL_PREFIX}rss/{series}.xml",
@@ -165,26 +169,18 @@ def _series_xml(series: str) -> str:
             "link": _series_bilibili_link(meta["mid"], meta["series_id"]),
             "category": "",
             "image": "",
-            "items": "\n".join(_scan_series_items(series)),
+            "items": "\n".join(_scan_items(root, "series", series)),
         }
     )
     return Template(feed_xml_template).substitute({"channel": series_string})
 
 
-def _load_new_videos(sid: str) -> list[dict]:
-    return _load_json(Path(new_base_path) / sid / "videos.json")
-
-
-def _load_new_video_meta(sid: str, bv: str) -> dict:
-    return _load_json(Path(new_base_path) / sid / bv / "meta.json")
-
-
-def _has_complete(sid: str, bv: str, base_path: str) -> bool:
+def _has_complete(root: Path, sid: str, bv: str) -> bool:
     """Whether the BV has a `complete` sentinel, meaning fetch succeeded."""
-    return (Path(base_path) / sid / bv / "complete").exists()
+    return (_channel_dir(root, "new", sid) / bv / "complete").exists()
 
 
-def _scan_new_items(sids: list[str], top_n: int = 5) -> list[str]:
+def _scan_new_items(root: Path, sids: list[str], top_n: int = 5) -> list[str]:
     """Merge the top-N newest videos across the given new-sids, return RSS item XML.
 
     For each sid, take the top_n by videos.json pubdate desc; then merge
@@ -195,7 +191,7 @@ def _scan_new_items(sids: list[str], top_n: int = 5) -> list[str]:
     """
     candidates: list[tuple[int, dict, str]] = []  # (pubdate, video, sid)
     for sid in sids:
-        videos = _load_new_videos(sid)
+        videos = _load_videos(root, "new", sid)
         sorted_videos = sorted(videos, key=lambda v: v.get("pubdate", 0), reverse=True)
         for v in sorted_videos[:top_n]:
             candidates.append((v.get("pubdate", 0), v, sid))
@@ -203,48 +199,32 @@ def _scan_new_items(sids: list[str], top_n: int = 5) -> list[str]:
     candidates.sort(key=lambda c: c[0], reverse=True)
 
     items: list[str] = []
-    for pubdate, video, sid in candidates:
+    for _pubdate, video, sid in candidates:
         bv = video["bvid"]
-        if not _has_complete(sid, bv, new_base_path):
+        if not _has_complete(root, sid, bv):
             logger.warning(
                 f"===> new: skipping {sid}/{bv} (no complete marker, fetch failed)"
             )
             continue
         try:
-            video_meta = _load_new_video_meta(sid, bv)
+            video_meta = _load_video_meta(root, "new", sid, bv)
         except FileNotFoundError:
             logger.warning(f"===> new: skipping {sid}/{bv} (meta.json missing)")
             continue
-        audio_path = f"{new_rss_path}{sid}/{bv}/{bv}.{AUDIO_FORMAT}"
-        local_audio = Path("output") / audio_path
-        length = local_audio.stat().st_size if local_audio.exists() else 0
-        items.append(
-            Template(item_template).substitute(
-                {
-                    "title": _xml_escape(video_meta.get("title", bv)),
-                    "description": _xml_escape(video_meta.get("desc", "")),
-                    "image": _xml_escape(video_meta.get("pic", "")),
-                    "url": RSS_URL_PREFIX + audio_path,
-                    "duration": video_meta.get("duration", 0),
-                    "length": length,
-                    "link": bilibili_link_prefix + bv,
-                    "date": _timestamp_to_date(video_meta.get("pubdate", 0)),
-                }
-            )
-        )
+        items.append(_render_item(root, "new", sid, bv, video_meta))
     return items
 
 
-def _new_xml(sids: list[str], uids: list[str], kinds: list[str], top_n: int = 5) -> str:
+def _new_xml(root: Path, sids: list[str], uids: list[str], kinds: list[str], top_n: int = 5) -> str:
     """Build the merged rss/new.xml.
 
     Channel-level fields (author / image / link) are taken from the first
     sid; items are merged across all sids.
     """
-    items = _scan_new_items(sids, top_n=top_n)
+    items = _scan_new_items(root, sids, top_n=top_n)
 
     if sids:
-        first_meta = _load_json(Path(new_base_path) / sids[0] / "meta.json")
+        first_meta = _load_dict(_channel_dir(root, "new", sids[0]) / "meta.json")
         first_kind = kinds[0]
         first_uid = uids[0]
         author = first_meta.get("upper", {}).get("name") or "Unknown"
@@ -278,19 +258,21 @@ def _new_xml(sids: list[str], uids: list[str], kinds: list[str], top_n: int = 5)
     return Template(feed_xml_template).substitute({"channel": channel_string})
 
 
-def generate(config: dict, output_root: str = "output", top_n: int = 5) -> None:
-    Path(output_root, "rss").mkdir(parents=True, exist_ok=True)
+def generate(config: dict, output_root: str | Path = "output", top_n: int = 5) -> None:
+    root = Path(output_root)
+    rss_dir = root / "rss"
+    rss_dir.mkdir(parents=True, exist_ok=True)
 
     for channel in _channel_sid_list_from(config, "season"):
-        Path(output_root, "rss", "season").mkdir(parents=True, exist_ok=True)
-        out_path = Path(output_root, "rss", "season", f"{channel}.xml")
-        out_path.write_text(_channel_xml(channel), encoding="utf-8")
+        (rss_dir / "season").mkdir(parents=True, exist_ok=True)
+        out_path = rss_dir / "season" / f"{channel}.xml"
+        out_path.write_text(_channel_xml(root, channel), encoding="utf-8")
         logger.info(f"===> wrote {out_path}")
 
     for series in _channel_sid_list_from(config, "series"):
-        Path(output_root, "rss", "series").mkdir(parents=True, exist_ok=True)
-        out_path = Path(output_root, "rss", "series", f"{series}.xml")
-        out_path.write_text(_series_xml(series), encoding="utf-8")
+        (rss_dir / "series").mkdir(parents=True, exist_ok=True)
+        out_path = rss_dir / "series" / f"{series}.xml"
+        out_path.write_text(_series_xml(root, series), encoding="utf-8")
         logger.info(f"===> wrote {out_path}")
 
     new_refs = config.get("new", [])
@@ -298,6 +280,8 @@ def generate(config: dict, output_root: str = "output", top_n: int = 5) -> None:
         sids = [str(c["sid"]) for c in new_refs]
         uids = [str(c["uid"]) for c in new_refs]
         kinds = [c["type"] for c in new_refs]
-        out_path = Path(output_root, "rss", "new.xml")
-        out_path.write_text(_new_xml(sids, uids, kinds, top_n=top_n), encoding="utf-8")
+        out_path = rss_dir / "new.xml"
+        out_path.write_text(
+            _new_xml(root, sids, uids, kinds, top_n=top_n), encoding="utf-8"
+        )
         logger.info(f"===> wrote {out_path}")

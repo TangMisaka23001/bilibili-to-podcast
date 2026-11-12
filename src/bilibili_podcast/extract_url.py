@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, cast
 from urllib.parse import urlparse, parse_qs
 
 
@@ -20,7 +20,7 @@ def _require_int(value: str, field: str, url: str) -> None:
         raise ValueError(f"{field} must be numeric in URL: {url}")
 
 
-def _extract_type(query: str, url: str) -> str:
+def _extract_type(query: str, url: str) -> Literal["season", "series"]:
     type_values = parse_qs(query).get("type")
     if not type_values:
         raise ValueError(f"missing required ?type= in URL: {url}")
@@ -29,7 +29,7 @@ def _extract_type(query: str, url: str) -> str:
         raise ValueError(
             f"invalid type '{type_}' in URL (must be one of {_VALID_TYPES}): {url}"
         )
-    return type_
+    return cast(Literal["season", "series"], type_)
 
 
 def parse_url(url: str) -> ChannelSource:
