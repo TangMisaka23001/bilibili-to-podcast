@@ -393,3 +393,88 @@ def test_generate_new_skips_bv_without_complete_marker(monkeypatch, tmp_path: Pa
     xml = (tmp_path / "rss" / "new.xml").read_text()
     assert "<title>OK</title>" in xml
     assert "<title>BROKEN</title>" not in xml
+
+
+# --- AI 总结：只作用于 new.xml ---
+
+def _write_summary(vdir: Path) -> None:
+    _write_json(vdir / "summary.json", {
+        "source": "bilibili-ai",
+        "summary": "七名登山客被困会吃人洋馆。",
+        "code": 0,
+        "fetched_at": "2026-11-12T02:00:00+00:00",
+        "chapters": [
+            {"start": 1, "title": "开场", "items": [{"start": 18, "text": "设定介绍"}]},
+            {"start": 601, "title": "第二段", "items": []},
+        ],
+    })
+    _write_json(vdir / "chapters.json", {"version": "1.2.0", "chapters": []})
+
+
+def _patch_urls(monkeypatch) -> None:
+    monkeypatch.setattr(rss, "RSS_URL_PREFIX", "https://p.example.com/")
+    monkeypatch.setattr(rss, "AUDIO_FORMAT", "m4a")
+    monkeypatch.setattr(rss, "bilibili_link_prefix", "https://www.bilibili.com/video/")
+
+
+def test_new_item_uses_ai_summary_and_emits_chapters(monkeypatch, tmp_path: Path):
+    base = tmp_path / "bilibili-new"
+    _setup_new_channel(str(base), "100", [
+        {"bvid": "BVaa1", "title": "A1", "pubdate": 1700000100, "duration": 10,
+         "pic": "", "desc": "UP 原简介"},
+    ])
+    _write_summary(base / "100" / "BVaa1")
+    _patch_urls(monkeypatch)
+
+    rss.generate({"season": [], "series": [], "new": [{"uid": "1", "sid": "100", "type": "season"}]},
+                 str(tmp_path))
+    xml = (tmp_path / "rss" / "new.xml").read_text()
+
+    assert "七名登山客被困会吃人洋馆。" in xml
+    assert "章节" in xml
+    assert "00:01 开场" in xml
+    assert "00:18 设定介绍" in xml
+    assert "原视频：https://www.bilibili.com/video/BVaa1" in xml
+    assert "B站 AI 生成" in xml
+    # 摘要超过原简介，不该再出现原简介
+    assert "UP 原简介" not in xml
+    assert (
+        '<podcast:chapters url="https://p.example.com/bilibili-new/100/BVaa1/chapters.json"'
+        ' type="application/json+chapters"/>'
+    ) in xml
+
+
+def test_new_item_falls_back_when_no_summary(monkeypatch, tmp_path: Path):
+    base = tmp_path / "bilibili-new"
+    _setup_new_channel(str(base), "100", [
+        {"bvid": "BVaa1", "title": "A1", "pubdate": 1700000100, "duration": 10,
+         "pic": "", "desc": "UP 原简介"},
+    ])
+    _patch_urls(monkeypatch)
+
+    rss.generate({"season": [], "series": [], "new": [{"uid": "1", "sid": "100", "type": "season"}]},
+                 str(tmp_path))
+    xml = (tmp_path / "rss" / "new.xml").read_text()
+
+    assert "<description>UP 原简介</description>" in xml
+    assert "podcast:chapters" not in xml
+
+
+def test_summary_is_ignored_for_season_feeds(monkeypatch, tmp_path: Path):
+    base = tmp_path / "bilibili-season"
+    _setup_season_channel(str(base), "598034", [
+        {"bvid": "BV1aa", "title": "第一集", "desc": "原简介", "pubdate": 1700000000,
+         "duration": 123, "pic": ""},
+    ])
+    _write_summary(base / "598034" / "BV1aa")
+    monkeypatch.setattr(rss, "RSS_URL_PREFIX", "https://podcast.example.com/")
+    monkeypatch.setattr(rss, "AUDIO_FORMAT", "m4a")
+    monkeypatch.setattr(rss, "bilibili_link_prefix", "https://www.bilibili.com/video/")
+
+    rss.generate({"season": [{"uid": "1", "sid": "598034", "type": "season"}], "series": [], "new": []},
+                 str(tmp_path))
+    xml = (tmp_path / "rss" / "season" / "598034.xml").read_text()
+
+    assert "<description>原简介</description>" in xml
+    assert "七名登山客" not in xml
+    assert "podcast:chapters" not in xml

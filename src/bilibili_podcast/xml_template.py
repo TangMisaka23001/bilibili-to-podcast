@@ -27,6 +27,6 @@ item_template = """<item>
 <link>$link</link>
 <itunes:duration>$duration</itunes:duration>
 <itunes:image href="$image" />
-<pubDate>$date</pubDate>
+<pubDate>$date</pubDate>$chapters
 </item>
 """

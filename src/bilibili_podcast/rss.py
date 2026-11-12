@@ -11,6 +11,12 @@ from email.utils import formatdate
 from pathlib import Path
 from string import Template
 
+from bilibili_podcast.bilibili.summary import (
+    CHAPTERS_FILE,
+    Summary,
+    format_timestamp,
+    load_summary,
+)
 from bilibili_podcast.config import (
     AUDIO_FORMAT,
     RSS_URL_PREFIX,
@@ -108,19 +114,67 @@ def _xml_escape(text: str) -> str:
     )
 
 
-def _render_item(root: Path, kind: str, sid: str, bv: str, video_meta: dict) -> str:
+#: description 里给章节明细的字数预算，超出后只保留章节标题。
+_DESCRIPTION_BUDGET = 1200
+
+
+def _description_with_summary(bv: str, summary: Summary) -> str:
+    """AI 总结 + 章节时间轴 + 原视频链接（纯文本，客户端渲染最稳）。"""
+    parts: list[str] = []
+    if summary.summary:
+        parts.append(summary.summary)
+    if summary.chapters:
+        lines = ["章节"]
+        budget = _DESCRIPTION_BUDGET
+        for chapter in summary.chapters:
+            heading = f"{format_timestamp(chapter.start)} {chapter.title}".rstrip()
+            lines.append(heading)
+            budget -= len(heading)
+            for item in chapter.items:
+                detail = f"  · {format_timestamp(item.start)} {item.text}"
+                if budget - len(detail) < 0:
+                    break
+                lines.append(detail)
+                budget -= len(detail)
+        parts.append("\n".join(lines))
+    parts.append(f"原视频：{bilibili_link_prefix}{bv}")
+    parts.append("（总结与章节由 B站 AI 生成）")
+    return "\n\n".join(parts)
+
+
+def _render_item(
+    root: Path,
+    kind: str,
+    sid: str,
+    bv: str,
+    video_meta: dict,
+    summary: Summary | None = None,
+) -> str:
     rel_audio = _rel(kind, sid, bv, f"{bv}.{AUDIO_FORMAT}")
     local_audio = root / rel_audio
     length = local_audio.stat().st_size if local_audio.exists() else 0
+
+    description = video_meta.get("desc", "")
+    chapters_tag = ""
+    if summary is not None and summary.available:
+        description = _description_with_summary(bv, summary)
+        if summary.chapters:
+            rel_chapters = _rel(kind, sid, bv, CHAPTERS_FILE)
+            chapters_tag = (
+                f'\n<podcast:chapters url="{RSS_URL_PREFIX}{rel_chapters}"'
+                f' type="application/json+chapters"/>'
+            )
+
     return Template(item_template).substitute(
         {
             "title": _xml_escape(video_meta.get("title", bv)),
-            "description": _xml_escape(video_meta.get("desc", "")),
+            "description": _xml_escape(description),
             "image": _xml_escape(video_meta.get("pic", "")),
             "url": RSS_URL_PREFIX + rel_audio,
             "duration": video_meta.get("duration", 0),
             "length": length,
             "audio_type": _audio_mime(),
+            "chapters": chapters_tag,
             "link": bilibili_link_prefix + bv,
             "date": _timestamp_to_date(video_meta.get("pubdate", 0)),
         }
@@ -211,7 +265,8 @@ def _scan_new_items(root: Path, sids: list[str], top_n: int = 5) -> list[str]:
         except FileNotFoundError:
             logger.warning(f"===> new: skipping {sid}/{bv} (meta.json missing)")
             continue
-        items.append(_render_item(root, "new", sid, bv, video_meta))
+        summary = load_summary(_channel_dir(root, "new", sid) / bv)
+        items.append(_render_item(root, "new", sid, bv, video_meta, summary))
     return items
 
 
