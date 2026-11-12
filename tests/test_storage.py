@@ -99,3 +99,40 @@ def test_sync_records_failed_uploads(s3, tmp_path: Path, monkeypatch):
 
     assert result.failed == ["a.m4a"]
     assert result.uploaded == []
+
+
+def test_sync_detects_same_size_content_change_via_md5(s3, tmp_path: Path):
+    """大小相同、内容不同的小文件必须重传（chapters.json 首章 1→0 就踩过这个坑）。"""
+    _write(tmp_path, "a/chapters.json", b'{"startTime": 1}')
+    s3.put_object(Bucket="bucket", Key="a/chapters.json", Body=b'{"startTime": 2}')
+
+    result = sync(str(tmp_path), "bucket", s3)
+
+    assert result.uploaded == ["a/chapters.json"]
+    body = s3.get_object(Bucket="bucket", Key="a/chapters.json")["Body"].read()
+    assert body == b'{"startTime": 1}'
+
+
+def test_sync_skips_when_md5_matches(s3, tmp_path: Path):
+    _write(tmp_path, "a/chapters.json", b'{"startTime": 0}')
+    s3.put_object(Bucket="bucket", Key="a/chapters.json", Body=b'{"startTime": 0}')
+
+    result = sync(str(tmp_path), "bucket", s3)
+
+    assert result.uploaded == []
+    assert result.skipped == ["a/chapters.json"]
+
+
+def test_sync_large_files_fall_back_to_size(s3, tmp_path: Path, monkeypatch):
+    """超过 1MiB 不做哈希（音频），大小相同直接跳过。"""
+    big = b"x" * (1 << 21)
+    _write(tmp_path, "a/BV1.m4a", big)
+    s3.put_object(Bucket="bucket", Key="a/BV1.m4a", Body=big)
+
+    calls: list[str] = []
+    monkeypatch.setattr("bilibili_podcast.storage._md5", lambda p: calls.append(p) or "x")
+
+    result = sync(str(tmp_path), "bucket", s3)
+
+    assert result.skipped == ["a/BV1.m4a"]
+    assert calls == []

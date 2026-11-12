@@ -432,8 +432,12 @@ def test_new_item_uses_ai_summary_and_emits_chapters(monkeypatch, tmp_path: Path
 
     assert "七名登山客被困会吃人洋馆。" in xml
     assert "章节" in xml
-    assert "00:01 开场" in xml
-    assert "00:18 设定介绍" in xml
+    # Apple 要求 HH:MM:SS 且首章 00:00:00
+    assert "00:00:00 开场" in xml
+    assert "10:01 第二段" in xml
+    # 要点行不带行首时间戳，避免被当成额外章节
+    assert "  · 设定介绍" in xml
+    assert "· 00:18" not in xml
     assert "原视频：https://www.bilibili.com/video/BVaa1" in xml
     assert "B站 AI 生成" in xml
     # 摘要超过原简介，不该再出现原简介

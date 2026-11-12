@@ -14,8 +14,9 @@ from string import Template
 from bilibili_podcast.bilibili.summary import (
     CHAPTERS_FILE,
     Summary,
-    format_timestamp,
+    format_clock,
     load_summary,
+    public_chapters,
 )
 from bilibili_podcast.config import (
     AUDIO_FORMAT,
@@ -119,24 +120,31 @@ _DESCRIPTION_BUDGET = 1200
 
 
 def _description_with_summary(bv: str, summary: Summary) -> str:
-    """AI 总结 + 章节时间轴 + 原视频链接（纯文本，客户端渲染最稳）。"""
+    """AI 总结 + 章节 + 原视频链接。
+
+    章节行必须是 Apple Podcasts 认得的 ``HH:MM:SS 标题`` 且首章 00:00:00，
+    否则客户端会把整段当成普通文本（实测 Apple 不会退化成章节列表）。
+    章节下面的事实要点不带行首时间戳，避免被解析成额外章节。
+    """
     parts: list[str] = []
     if summary.summary:
         parts.append(summary.summary)
-    if summary.chapters:
+
+    chapters = public_chapters(summary)
+    if chapters:
         lines = ["章节"]
         budget = _DESCRIPTION_BUDGET
-        for chapter in summary.chapters:
-            heading = f"{format_timestamp(chapter.start)} {chapter.title}".rstrip()
-            lines.append(heading)
-            budget -= len(heading)
+        for chapter in chapters:
+            lines.append(f"{format_clock(chapter.start)} {chapter.title}".rstrip())
+            budget -= len(lines[-1])
             for item in chapter.items:
-                detail = f"  · {format_timestamp(item.start)} {item.text}"
+                detail = f"  · {item.text}"
                 if budget - len(detail) < 0:
                     break
                 lines.append(detail)
                 budget -= len(detail)
         parts.append("\n".join(lines))
+
     parts.append(f"原视频：{bilibili_link_prefix}{bv}")
     parts.append("（总结与章节由 B站 AI 生成）")
     return "\n\n".join(parts)
@@ -158,7 +166,7 @@ def _render_item(
     chapters_tag = ""
     if summary is not None and summary.available:
         description = _description_with_summary(bv, summary)
-        if summary.chapters:
+        if public_chapters(summary):
             rel_chapters = _rel(kind, sid, bv, CHAPTERS_FILE)
             chapters_tag = (
                 f'\n<podcast:chapters url="{RSS_URL_PREFIX}{rel_chapters}"'

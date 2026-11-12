@@ -7,14 +7,17 @@ from pathlib import Path
 
 from bilibili_podcast.bilibili.summary import (
     CHAPTERS_FILE,
+    MAX_CHAPTERS,
     SUMMARY_FILE,
     Chapter,
     OutlineItem,
     Summary,
     chapters_payload,
+    format_clock,
     format_timestamp,
     load_summary,
     normalize,
+    public_chapters,
     summarize_video,
     write_summary,
 )
@@ -136,9 +139,49 @@ def test_chapters_payload_matches_podcasting2_spec():
 
     assert payload["version"] == "1.2.0"
     first = payload["chapters"][0]
-    assert first["startTime"] == 1
+    # Apple Podcasts 要求首章 00:00:00
+    assert first["startTime"] == 0
     assert first["title"] == "开场"
-    assert first["url"] == "https://www.bilibili.com/video/BV1xx?t=1"
+    assert first["url"] == "https://www.bilibili.com/video/BV1xx?t=0"
+    # 其余章节保持原时间
+    assert payload["chapters"][1]["startTime"] == 601
+
+
+def test_public_chapters_clamps_first_to_zero():
+    summary = normalize(RAW_OK, fetched_at="now")
+    chapters = public_chapters(summary)
+    assert chapters[0].start == 0
+    assert chapters[1].start == 601
+
+
+def test_public_chapters_truncates_long_titles():
+    summary = Summary(
+        source="bilibili-ai",
+        summary="s",
+        chapters=(Chapter(start=0, title="一" * 80),),
+    )
+    title = public_chapters(summary)[0].title
+    assert len(title) <= 45
+    assert title.endswith("…")
+
+
+def test_public_chapters_caps_count():
+    summary = Summary(
+        source="bilibili-ai",
+        summary="s",
+        chapters=tuple(Chapter(start=i * 60, title=f"c{i}") for i in range(40)),
+    )
+    assert len(public_chapters(summary)) == MAX_CHAPTERS
+
+
+def test_public_chapters_empty_when_no_chapters():
+    assert public_chapters(Summary(source="bilibili-ai", summary="only text")) == ()
+
+
+def test_format_clock_is_hh_mm_ss():
+    assert format_clock(0) == "00:00:00"
+    assert format_clock(61) == "00:01:01"
+    assert format_clock(3671) == "01:01:11"
 
 
 # --- summarize_video: 缓存与 TTL ---

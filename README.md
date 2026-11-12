@@ -165,7 +165,8 @@ output/
 | 情况 | 行为 |
 |---|---|
 | 本地有、远端无 | 上传 |
-| 远端大小 ≠ 本地大小 | 重传（`list_objects_v2` 只有 Size，没有内容哈希） |
+| 远端大小 ≠ 本地大小 | 重传 |
+| 大小相同但内容变了（≤1 MiB） | 用本地 md5 与远端 ETag 比对，不一致就重传 |
 | `rss/**` 与根目录 `index.html` | **每轮强制重传**（内容会变，大小可能不变） |
 | 远端有、本地无 | 删除 |
 | 单个文件失败 | 记入 `failed`，`b2p-sync` 以非零码退出 |
@@ -220,7 +221,7 @@ src/bilibili_podcast/
 说明对象没有 `ContentType`。用当前版本跑 `b2p-sync` 会补上；旧版本上传的对象需要重传一次。
 
 **Q：桶里内容没更新？**
-`b2p-sync` 用 `Size` 比对，内容变了但大小巧合一致的文件不会自动重传——`rss/**` 和 `index.html` 已强制重传，其它自制文件请确保写入后触发一次修改大小，或临时删除远端对象。
+早期版本只比对 `Size`，改一个字符但字节数不变的文件会漏传。现在 ≤1 MiB 的文件会额外比对 md5（S3 单段上传的 ETag 就是 md5），`rss/**` 与 `index.html` 仍然每轮强制重传。若仍怀疑未更新，删掉远端对象再同步一次即可。
 
 **Q：某个视频下载失败会中断整轮吗？**
 不会。单视频失败只记 error 并跳过（没有 `complete` 就不会进 RSS），重跑 `b2p-fetch` 会自动重试。
@@ -232,7 +233,9 @@ src/bilibili_podcast/
 B站只为部分视频生成了 AI 总结（本地实测约 85%），取不到时 description 回退到 UP 主简介。没取到结果的视频会在 7 天后自动重试（B站可能事后补生成）；想立刻重抓用 `b2p-summarize --force`。该接口需要登录 Cookie，匿名会返回 -101。
 
 **Q：客户端里看不到章节？**
-章节走 Podcasting 2.0 的 `podcast:chapters` 外链 JSON，Apple Podcasts / Pocket Casts / Overcast / Fountain / Podverse 支持，部分客户端不读该标签。章节文件需要先随 `b2p-sync` 上传到桶里才能被拉到。
+章节同时走两条路：description 里的 `HH:MM:SS 标题` 章节列表，以及 Podcasting 2.0 的 `podcast:chapters` 外链 JSON。
+Apple Podcasts 的硬性要求（[官方说明](https://podcasters.apple.com/support/5482-using-chapters-on-apple-podcasts)）：**首章必须 00:00:00、至少 3 章、时间戳用 HH:MM:SS**；建议每小时不超过 6 章、标题不超过 45 字符。本项目已按此归零首章、截断标题、把章节数收到 12 以内。
+注意：description 里不足 3 章时 Apple 会改用自动生成（需 iOS 26.2+）；`podcast:chapters` 需要客户端读取该标签，且章节文件必须先随 `b2p-sync` 上传到桶里。
 
 **Q：想加/删合集？**
 编辑 `sources.json` 后重跑 `bash start.sh`：新增的会抓全量，删除的会被 `b2p-prune` 清掉本地目录，桶里对应对象在下次 `b2p-sync` 时删除。

@@ -38,6 +38,11 @@ CHAPTERS_VERSION = "1.2.0"
 #: 没取到总结的视频，隔这么多天再试一次（B站可能事后补生成）。
 RETRY_AFTER_DAYS = 7
 
+#: Apple Podcasts 对章节的硬性/建议要求（podcasters.apple.com/support/5482）：
+#: 首章必须从 00:00:00 开始，标题不超过 45 字符，每小时不超过 6 章。
+CHAPTER_TITLE_LIMIT = 45
+MAX_CHAPTERS = 12
+
 
 @dataclass(frozen=True)
 class OutlineItem:
@@ -70,13 +75,49 @@ class Summary:
 
 
 def format_timestamp(seconds: int) -> str:
-    """秒 → ``mm:ss`` / ``h:mm:ss``，用于 description 里的人工可读时间轴。"""
+    """秒 → ``mm:ss`` / ``h:mm:ss``。"""
     seconds = max(0, int(seconds))
     hours, rest = divmod(seconds, 3600)
     minutes, secs = divmod(rest, 60)
     if hours:
         return f"{hours}:{minutes:02d}:{secs:02d}"
     return f"{minutes:02d}:{secs:02d}"
+
+
+def format_clock(seconds: int) -> str:
+    """秒 → ``HH:MM:SS``。
+
+    Apple Podcasts 解析 episode description 里的章节时按这个格式识别，
+    并且要求第一章写成 ``00:00:00``。
+    """
+    seconds = max(0, int(seconds))
+    hours, rest = divmod(seconds, 3600)
+    minutes, secs = divmod(rest, 60)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+
+def public_chapters(
+    summary: Summary,
+    *,
+    max_chapters: int = MAX_CHAPTERS,
+    title_limit: int = CHAPTER_TITLE_LIMIT,
+) -> tuple[Chapter, ...]:
+    """客户端展示用的章节列表：首章归零、标题截断、数量收敛。
+
+    B站给出的第一个章节通常在 1~20 秒，Apple Podcasts 会因此认为
+    「首章不是 00:00:00」而不解析 description 里的章节，所以这里统一归零。
+    """
+    if not summary.chapters:
+        return ()
+    kept = list(summary.chapters[:max_chapters])
+    out: list[Chapter] = []
+    for index, chapter in enumerate(kept):
+        title = chapter.title.strip()
+        if len(title) > title_limit:
+            title = title[: title_limit - 1].rstrip() + "…"
+        start = 0 if index == 0 else chapter.start
+        out.append(Chapter(start=start, title=title, items=chapter.items))
+    return tuple(out)
 
 
 def _as_int(value) -> int:
@@ -173,7 +214,10 @@ def from_payload(data: dict) -> Summary:
 
 
 def chapters_payload(summary: Summary, bv: str) -> dict:
-    """podcast:chapters 规范要求的 JSON（startTime 秒 + 标题 + 可跳转链接）。"""
+    """podcast:chapters 规范要求的 JSON（startTime 秒 + 标题 + 可跳转链接）。
+
+    内容与 description 里的章节列表保持一致，首章同样归零。
+    """
     return {
         "version": CHAPTERS_VERSION,
         "chapters": [
@@ -182,7 +226,7 @@ def chapters_payload(summary: Summary, bv: str) -> dict:
                 "title": chapter.title or format_timestamp(chapter.start),
                 "url": f"{bilibili_link_prefix}{bv}?t={chapter.start}",
             }
-            for chapter in summary.chapters
+            for chapter in public_chapters(summary)
         ],
     }
 
@@ -198,16 +242,30 @@ def load_summary(video_dir: Path) -> Summary | None:
         return None
 
 
+def _write_if_changed(path: Path, text: str) -> bool:
+    """内容一致就不重写——避免每轮跑出新的 mtime/size 触发 R2 重传。"""
+    if path.is_file():
+        try:
+            if path.read_text(encoding="utf-8") == text:
+                return False
+        except OSError:
+            pass
+    path.write_text(text, encoding="utf-8")
+    return True
+
+
 def write_summary(video_dir: Path, summary: Summary, *, bv: str) -> None:
+    """落盘 summary.json / chapters.json；渲染规则变化时下一次运行会自愈。"""
     video_dir.mkdir(parents=True, exist_ok=True)
-    (video_dir / SUMMARY_FILE).write_text(
-        json.dumps(to_payload(summary), ensure_ascii=False, indent=2), encoding="utf-8"
+    _write_if_changed(
+        video_dir / SUMMARY_FILE,
+        json.dumps(to_payload(summary), ensure_ascii=False, indent=2),
     )
     chapters_path = video_dir / CHAPTERS_FILE
     if summary.chapters:
-        chapters_path.write_text(
+        _write_if_changed(
+            chapters_path,
             json.dumps(chapters_payload(summary, bv), ensure_ascii=False, indent=2),
-            encoding="utf-8",
         )
     else:
         chapters_path.unlink(missing_ok=True)
@@ -254,8 +312,11 @@ def summarize_video(
     existing = load_summary(video_dir)
     if existing is not None and not force:
         if existing.source == "bilibili-ai":
+            # 复用已有结果，但按当前渲染规则重写产物（章节归零/截断等改动可自愈）
+            write_summary(video_dir, existing, bv=str(bv))
             return existing
         if _is_fresh(existing, now, retry_days):
+            write_summary(video_dir, existing, bv=str(bv))
             return existing
 
     raw = fetch_conclusion(str(bv), int(cid), int(up_mid))

@@ -6,6 +6,7 @@ forced (see ``force_prefixes`` / ``force_keys``); remote-only keys are deleted.
 """
 from __future__ import annotations
 
+import hashlib
 import mimetypes
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -30,6 +31,11 @@ _IMMUTABLE_SUFFIXES = (".m4a", ".mp3", ".opus", ".jpg", ".png", ".webp")
 #: Uploads are network-bound; a small pool keeps a first full sync from
 #: serialising thousands of round trips.
 _UPLOAD_WORKERS = 8
+
+#: 小于该体积的文件在「大小相同」时再比对内容哈希。S3 对单段上传的 ETag
+#: 就是文件 md5，所以能和本地 md5 直接比。小文件（RSS/JSON/HTML）常出现
+#: 「改一个字符、字节数不变」的情况，只比 Size 会漏掉更新。
+_HASH_SIZE_LIMIT = 1 << 20  # 1 MiB
 
 
 @dataclass
@@ -82,13 +88,26 @@ def _walk_local_keys(local_root: str) -> dict[str, int]:
     return sizes
 
 
-def _list_remote_sizes(client, bucket: str) -> dict[str, int]:
-    sizes: dict[str, int] = {}
+def _list_remote(client, bucket: str) -> dict[str, tuple[int, str]]:
+    """key -> (size, etag)。ETag 单段上传时即 md5。"""
+    remote: dict[str, tuple[int, str]] = {}
     paginator = client.get_paginator("list_objects_v2")
     for page in paginator.paginate(Bucket=bucket):
         for obj in page.get("Contents", []):
-            sizes[obj["Key"]] = obj["Size"]
-    return sizes
+            remote[obj["Key"]] = (obj["Size"], obj.get("ETag", "").strip('"'))
+    return remote
+
+
+def _md5(path: str) -> str:
+    """本地文件 md5 —— 只用于和 S3 单段上传的 ETag 比对，不是安全用途。"""
+    digest = hashlib.md5(usedforsecurity=False)
+    try:
+        with open(path, "rb") as handle:
+            for block in iter(lambda: handle.read(1 << 20), b""):
+                digest.update(block)
+    except OSError:
+        return ""
+    return digest.hexdigest()
 
 
 def _upload_all(
@@ -139,19 +158,26 @@ def _top_dir(key: str) -> str:
 
 def _needs_upload(
     key: str,
-    local_size: int,
-    remote_sizes: dict[str, int],
+    local_path: str,
+    remote: dict[str, tuple[int, str]],
     force_prefixes: tuple[str, ...],
     force_keys: tuple[str, ...],
 ) -> bool:
     if key in force_keys or _top_dir(key) in force_prefixes:
         return True
-    if key not in remote_sizes:
+    if key not in remote:
         return True
-    # Size is the only cheap signal available from list_objects_v2; identical
-    # size means "very likely unchanged". Small volatile files should be listed
-    # in force_keys by the caller instead.
-    return remote_sizes[key] != local_size
+
+    remote_size, remote_etag = remote[key]
+    local_size = os.path.getsize(local_path)
+    if remote_size != local_size:
+        return True
+
+    # 大小相同不等于内容相同：小文件用 md5 和 ETag 比对（多段上传的 ETag 带
+    # "-<part>" 后缀，此时无法直接比 md5，退回到「大小相同视为未变」）。
+    if local_size <= _HASH_SIZE_LIMIT and remote_etag and "-" not in remote_etag:
+        return _md5(local_path) != remote_etag
+    return False
 
 
 def sync(
@@ -169,14 +195,20 @@ def sync(
     list_objects_v2 only exposes size, not content hashes.
     """
     local_sizes = _walk_local_keys(local_root)
-    remote_sizes = _list_remote_sizes(client, bucket_name)
+    remote = _list_remote(client, bucket_name)
 
     to_upload = sorted(
         key
-        for key, size in local_sizes.items()
-        if _needs_upload(key, size, remote_sizes, force_prefixes, force_keys)
+        for key in local_sizes
+        if _needs_upload(
+            key,
+            os.path.join(local_root, key.replace("/", os.sep)),
+            remote,
+            force_prefixes,
+            force_keys,
+        )
     )
-    to_delete = sorted(set(remote_sizes) - set(local_sizes))
+    to_delete = sorted(set(remote) - set(local_sizes))
     to_skip = sorted(set(local_sizes) - set(to_upload))
 
     uploaded, failed = _upload_all(client, bucket_name, local_root, to_upload)
