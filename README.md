@@ -33,13 +33,18 @@
 # 1. 解压 vendored 依赖（在仓库根目录执行，会生成 vendor/bilibili-api-main/）
 tar -xzf vendor.tar.gz
 
-# 2. 安装项目
+# 2. 安装 vendored 的 bilibili-api fork
 python -m venv .venv && source .venv/bin/activate
+pip install -e ./vendor/bilibili-api-main
+
+# 3. 安装本项目
 pip install -e ".[dev]"
 ```
 
-`vendor.tar.gz` 解压后的目录结构为 `vendor/bilibili-api-main/`，`pyproject.toml` 中的
-`bilibili-api-python` 依赖直接指向该本地路径，缺了它 `pip install` 会直接失败。
+`vendor/bilibili-api-main/` 是 `bilibili-api` 的 fork 快照，**必须在上面的第 2 步单独安装**：
+PEP 621 的 `dependencies` 无法表达相对路径，写绝对路径会把仓库锁死在某个克隆位置，
+所以它不在 `pyproject.toml` 的 `dependencies` 里。跳过第 2 步会直接报
+`ModuleNotFoundError: No module named 'bilibili_api'`。
 
 系统依赖：**ffmpeg**（macOS: `brew install ffmpeg`，Linux: `apt install ffmpeg`）
 

@@ -13,8 +13,10 @@ dependencies = [
     "PyYAML>=6.0",
     "yt-dlp>=2026.8.19",
     "schedule>=1.2",
-    "bilibili-api-python @ file:///workspaces/bilibili-to-podcast/vendor/bilibili-api-main",
 ]
+# NOTE: bilibili-api fork 以 vendor.tar.gz 分发，需在安装本项目前单独安装：
+#   tar -xzf vendor.tar.gz && pip install -e ./vendor/bilibili-api-main
+# 不写进 dependencies 是因为 PEP 621 无法表达相对路径，绝对路径会锁死克隆位置。
 
 [project.optional-dependencies]
 dev = [
