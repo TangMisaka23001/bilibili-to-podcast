@@ -1,216 +1,245 @@
-<div align="center">
-
-<img src="https://img.shields.io/github/license/TangMisaka23001/bilibili-to-podcast" alt="License">
-<img src="https://img.shields.io/badge/python-3.11+-blue" alt="Python">
-<img src="https://img.shields.io/badge/yt--dlp-ffmpeg-orange" alt="yt-dlp">
-
-</div>
-
 # bilibili-to-podcast
 
-将 B 站的视频**合集**和**系列**自动转成可在 Podcast 应用中订阅收听的 RSS Feed。
+把 B 站**合集（season）/ 系列（series）**自动转成标准播客 RSS：抓元数据 → 抽音频 → 生成 XML → 镜像到对象存储（Cloudflare R2 或任意 S3 兼容服务）→ 生成订阅首页。
 
-> 抓取视频 → 抽取音频 → 生成播客 XML → 同步到 R2 → 定时刷新
+订阅地址生成后可直接粘进 Apple Podcasts、Pocket Casts、AntennaPod 等客户端。
 
-> 详细的模块说明、数据结构、扩展指引见 [`docs/FUNCTIONAL.md`](docs/FUNCTIONAL.md)。
-> 设计文档见 [`docs/compose/specs/`](docs/compose/specs/)。
-## ✨ 特性
+```
+sources.json (合集 URL)
+        │
+        ├─ b2p-prune      清理已从 sources.json 移除的合集目录
+        ├─ b2p-fetch      B站 API 取元数据 → yt-dlp + ffmpeg 抽音频
+        ├─ b2p-summarize  取 B站 AI 总结 → description 素材 + 章节文件（仅最新视频流）
+        ├─ b2p-rss        生成 rss/season/{sid}.xml、rss/series/{sid}.xml、rss/new.xml
+        ├─ b2p-gen-index  生成 output/index.html（订阅首页）
+        ├─ b2p-sync       把 output/ 镜像到 R2（含 Content-Type / Cache-Control）
+        └─ b2p-size       打印本轮磁盘占用
+```
 
-- 🎯 支持 B 站两种合集类型：**Season（合集）** 和 **Series（系列）**
-- 🎵 用 `yt-dlp` + `ffmpeg` 抽取 `m4a` 音频（最低码率，文件最小）
-- 🔄 自动翻页拉取合集内全部视频；`complete` 标记跳过已下载，**幂等可重跑**
-- 📻 输出标准 RSS 2.0 + iTunes / Podcast Index namespace，兼容 Apple Podcasts、Pocket Casts 等主流客户端
-- ☁️ 音频 + RSS + 首页 HTML 都同步到 Cloudflare R2（S3 兼容），挂任意域名即用
-- ⏰ 内置 24h 定时调度，自动拉取新视频、生成 RSS 与首页、清理残留目录
+## 特性
 
-## 🚀 快速开始
+- 支持 B 站两种合集类型：`season`（合集）与 `series`（系列）
+- 音频默认抽成 `m4a`（最低码率，单集通常几 MB～几十 MB）
+- **幂等可重跑**：每个视频目录下有 `complete` 标记，已成功的不会重复下载
+- **最新视频聚合流**：`rss/new.xml` 跨多个合集取各自最新 N 个，按发布时间倒序合并
+- **AI 总结与章节**：`rss/new.xml` 的每集描述带 B站官方 AI 总结 + 按时间轴的分章摘要，并输出 Podcasting 2.0 `podcast:chapters`（Apple Podcasts / Pocket Casts / Overcast 可点章节跳转）
+- 同步是**真镜像**：本地有变化就重传、远端多出来的就删除，不会出现「改了但线上没变」
+- 上传自动设置 `ContentType` 与 `Cache-Control`，静态首页与音频都能被客户端/浏览器正确处理
+- 24 小时定时调度内置（`b2p-cron`），也可交给系统 cron / systemd timer
 
-### 安装
+## 快速开始
 
-`vendor/` 中的 `bilibili-api` fork 快照不入库，以根目录的 `vendor.tar.gz` 分发，**首次安装前必须先解压**：
+### 0. 系统依赖
+
+| 依赖 | 说明 |
+|---|---|
+| Python **3.11+** | 使用 `datetime.UTC` 等 3.11 特性 |
+| **ffmpeg** | yt-dlp 抽音频用；`brew install ffmpeg` / `apt install ffmpeg` |
+| **B站登录 Cookie** | 视频详情接口与下载在匿名状态下会返回 412，必须登录态 |
+
+### 1. 解压 vendored 依赖
+
+仓库不直接包含 `vendor/`（B站的 `bilibili-api` fork 快照），以根目录的 `vendor.tar.gz` 分发，**首次安装前必须先解压**：
 
 ```bash
-# 1. 解压 vendored 依赖（在仓库根目录执行，会生成 vendor/bilibili-api-main/）
-tar -xzf vendor.tar.gz
+tar -xzf vendor.tar.gz          # 生成 vendor/bilibili-api-main/
+```
 
-# 2. 安装 vendored 的 bilibili-api fork
+### 2. 安装
+
+```bash
 python -m venv .venv && source .venv/bin/activate
+
+# 先装 vendored 的 bilibili-api fork（不在 pyproject 的 dependencies 里：
+# PEP 621 无法表达相对路径，写绝对路径会把仓库锁死在某个克隆位置）
 pip install -e ./vendor/bilibili-api-main
 
-# 3. 安装本项目
+# 再装本项目与开发依赖
 pip install -e ".[dev]"
 ```
 
-`vendor/bilibili-api-main/` 是 `bilibili-api` 的 fork 快照，**必须在上面的第 2 步单独安装**：
-PEP 621 的 `dependencies` 无法表达相对路径，写绝对路径会把仓库锁死在某个克隆位置，
-所以它不在 `pyproject.toml` 的 `dependencies` 里。跳过第 2 步会直接报
-`ModuleNotFoundError: No module named 'bilibili_api'`。
+跳过第二步会报 `ModuleNotFoundError: No module named 'bilibili_api'`。
 
-系统依赖：**ffmpeg**（macOS: `brew install ffmpeg`，Linux: `apt install ffmpeg`）
-
-### 配置
-
-本项目不依赖 `config.yaml`。配置分两部分：
-
-#### 1. 合集列表 — `sources.json`（项目根目录，必填）
+### 3. 配置要追踪的合集：`sources.json`
 
 ```json
-[
-  "https://space.bilibili.com/391930545/lists/598034?type=season",
-  "https://space.bilibili.com/14145636/lists/4891774?type=series"
-]
+{
+  "all": [
+    "https://space.bilibili.com/391930545/lists/8722727?type=season"
+  ],
+  "new": [
+    "https://space.bilibili.com/23947287/lists/665?type=season"
+  ]
+}
 ```
 
-填入要追踪的 B 站合集页 URL，系统自动从 URL 解析 `uid` / `sid` / `type`。  
-文件缺失会启动失败（`ConfigError: sources file not found`）。
+| 字段 | 行为 |
+|---|---|
+| `all` | 长期追踪：抓合集内**全部**视频，每个合集一条独立 RSS |
+| `new` | 只观察：每个合集只抓**最新 N 个**（默认 5），不生成独立 RSS，只在 `rss/new.xml` 里出现 |
 
-#### 2. 运行参数 — 环境变量
+URL 必须形如 `https://space.bilibili.com/{uid}/lists/{sid}?type=season|series`，缺 `type` 或缺数字 `uid/sid` 会直接报错。文件缺失会启动失败。
 
-| 变量 | 必填 | 说明 | 示例 |
-|------|------|------|------|
-| `RSS_URL_PREFIX` | ✅ | 播客 RSS 公开访问的前缀（必须等于 R2 公开域名） | `https://podcast.example.com/` |
-| `PORT` | — | 本地 HTTP 端口（默认 `8000`） | `8000` |
-| `R2_ACCESS_KEY` | ✅ | Cloudflare R2 Access Key ID | `xxxxxxxxxx` |
-| `R2_SECRET_KEY` | ✅ | Cloudflare R2 Secret Access Key | `xxxxxxxxxx` |
-| `R2_ENDPOINT_URL` | ✅ | R2 S3 Endpoint | `https://<account-id>.r2.cloudflarestorage.com` |
-| `R2_BUCKET_NAME` | ✅ | R2 桶名 | `bilibili-podcast` |
-| `B2P_COOKIE_CONTENT` | — | B 站 cookies.txt 全文（CI 场景使用，本地可直接放 `src/cookie` 文件） | 浏览器导出的内容 |
+### 4. 配置对外域名与对象存储：`config.yaml`
 
-也可以放到 shell rc 或 `.env` 文件里 source 后再跑。  
-本地开发最小可用配置：
+```yaml
+RSS_URL_PREFIX: https://podcast.example.com/   # 必须以 / 结尾；等于桶的公开域名
 
-```bash
-export RSS_URL_PREFIX=http://localhost:8000
-export R2_ACCESS_KEY=dev-access-key
-export R2_SECRET_KEY=dev-secret-key
-export R2_ENDPOINT_URL=https://<account-id>.r2.cloudflarestorage.com
-export R2_BUCKET_NAME=bilibili-podcast
+R2:
+  ACCESS_KEY: xxxxxxxx
+  SECRET_KEY: xxxxxxxx
+  ENDPOINT_URL: https://<account-id>.r2.cloudflarestorage.com
+  BUCKET_NAME: bilibili-podcast
 ```
 
-#### 3. 可选：自定义 yaml 路径
+> `config.yaml` 与 `cookie` 都在 `.gitignore` 里，不要提交。
+> `b2p-sync` **只从 `config.yaml` 的 `R2` 段读凭据**，环境变量不会生效。
+> 想放到别处：`export B2P_CONFIG_PATH=/path/to/config.yaml`（`sources.json` 需与它同目录）。
 
-默认 `config.yaml` 与 `sources.json` 同目录（项目根）。如果想把 `sources.json` 放到别处：
+### 5. 放 Cookie
+
+二选一：
 
 ```bash
-export B2P_CONFIG_PATH=/path/to/your/config.yaml
+# A. 环境变量（适合 CI）
+export B2P_COOKIE_CONTENT="$(cat cookies.txt)"
+
+# B. 仓库根目录的 cookie 文件（Netscape 格式，浏览器插件导出即可）
+cp ~/Downloads/cookies.txt ./cookie
 ```
 
-### 运行
+### 6. 跑一遍
 
 ```bash
-# 一键全流程
 bash start.sh
+```
 
-# 或分步执行
-b2p-prune                     # 清理不在 sources 中的旧目录
-b2p-fetch                     # 拉取合集元数据 + 抽取音频
-b2p-rss                       # 生成 RSS XML
-b2p-gen-index                 # 生成 output/index.html（桶首页，随 b2p-sync 一起上传）
-b2p-sync                      # 同步到 R2
+看到 `uploaded=N deleted=N skipped=N failed=0` 且桶里出现 `rss/`、`index.html` 即成功；`failed` 非 0 时命令以非零码退出。
 
-# 定时调度（每 24h 跑一轮）
+## 命令一览
+
+| 命令 | 作用 | 常用参数 |
+|---|---|---|
+| `b2p-prune` | 删除已不在 `sources.json` 中的合集目录 | `--dry-run`、`--output-root` |
+| `b2p-fetch` | 拉合集元数据 + 逐个视频下载音频 | `--new-top-n`（默认 5）、`--output-root` |
+| `b2p-summarize` | 抓 B站 AI 总结 + 章节（只处理最新视频流） | `--force`、`--retry-days`、`--sleep` |
+| `b2p-rss` | 生成 RSS XML | `--new-top-n`、`--output-root` |
+| `b2p-gen-index` | 生成订阅首页 HTML | `--output`（默认 `<output-root>/index.html`） |
+| `b2p-sync` | 把 `output/` 镜像到桶 | `--output-root` |
+| `b2p-size` | 打印 `output/` 各子目录体积 | `--output-root` |
+| `b2p-cron` | 每 24h 跑一轮 prune→fetch→summarize→rss→gen-index→sync | — |
+| `bash start.sh` | 全流程 + 体积统计 | — |
+
+所有带 `--config` 的命令默认读 `./config.yaml`。
+
+## 产物结构
+
+本地 `output/` 的结构就是桶里的 key 结构（同步时原样镜像）：
+
+```
+output/
+├── index.html                          # 订阅首页
+├── rss/
+│   ├── season/{sid}.xml                # 每个 all 合集一条
+│   ├── series/{sid}.xml
+│   └── new.xml                         # 跨合集的最新视频聚合流
+├── bilibili-season/{sid}/
+│   ├── meta.json                       # 合集元信息
+│   ├── videos.json                     # 视频列表（含 pubdate，用于排序）
+│   └── {bvid}/
+│       ├── meta.json                   # 单视频详情（标题、简介、封面、cid…）
+│       ├── pic.jpg                     # 封面
+│       ├── {bvid}.m4a                  # 音频
+│       └── complete                    # 幂等标记：存在即视为已完成
+├── bilibili-series/{sid}/…             # 结构同上
+└── bilibili-new/{sid}/…                # 只保留各合集最新 N 个
+    └── {bvid}/
+        ├── summary.json                # B站 AI 总结（归一化，含章节与时间点）
+        └── chapters.json               # podcast:chapters 规范文件（可跳转 B站对应秒）
+```
+
+只有带 `complete` 的视频才会进入 RSS；缺 `meta.json` 或缺标记的会被跳过并记 warning。
+
+### 同步规则（`b2p-sync`）
+
+| 情况 | 行为 |
+|---|---|
+| 本地有、远端无 | 上传 |
+| 远端大小 ≠ 本地大小 | 重传（`list_objects_v2` 只有 Size，没有内容哈希） |
+| `rss/**` 与根目录 `index.html` | **每轮强制重传**（内容会变，大小可能不变） |
+| 远端有、本地无 | 删除 |
+| 单个文件失败 | 记入 `failed`，`b2p-sync` 以非零码退出 |
+
+上传时按扩展名设置 `ContentType`（`m4a → audio/mp4`、`xml → application/xml`、`html → text/html`），并设置 `Cache-Control`：音频/封面 `immutable`，其余 `max-age=300`。
+
+## 定时运行
+
+```bash
+# 内置调度（前台常驻，每 24h 一轮）
 b2p-cron
-
-# 查看帮助
-b2p-fetch --help
 ```
 
-### 自动更新
+或用系统 cron / systemd timer：
 
-全流程在本地 / 自有服务器执行：`b2p-cron` 内置 24h 调度，或用系统 cron / systemd timer 定时跑 `bash start.sh`。
-仓库不提供 GitHub Actions 工作流（含早前的 Pages 部署）。
-
-## 📂 项目结构
-
-```
-.
-├── pyproject.toml
-├── sources.json                   # 合集 URL 列表（必填）
-├── start.sh                       # 一键脚本
-├── vendor.tar.gz                  # vendored bilibili-api，需解压为 vendor/
-├── docs/
-│   ├── FUNCTIONAL.md
-│   └── compose/specs/
-├── tests/
-│   └── test_*.py
-└── src/
-    └── bilibili_podcast/
-        ├── config.py              # 全局配置（读 env）
-        ├── config_loader.py       # sources.json → season/series
-        ├── extract_url.py
-        ├── storage.py
-        ├── rss.py
-        ├── xml_template.py
-        ├── logger.py
-        ├── bilibili/
-        │   ├── channel.py
-        │   ├── audio.py
-        │   └── meta.py
-        └── cli/
-            ├── prune.py           # b2p-prune
-            ├── fetch.py           # b2p-fetch
-            ├── rss_cmd.py         # b2p-rss
-            ├── sync.py            # b2p-sync
-            ├── gen_index.py       # b2p-gen-index
-            ├── cron.py            # b2p-cron
-            └── _config_cli.py     # 旧 yaml→yaml 转换工具（独立 CLI）
+```cron
+0 3 * * * cd /path/to/bilibili-to-podcast && /path/to/.venv/bin/bash start.sh >> log/cron.log 2>&1
 ```
 
-## 🔄 数据流
-
-```
-sources.json (合集 URL 列表)
-+ env: RSS_URL_PREFIX / R2_*
-          ↓
-     B 站 API (bilibili-api-python)
-          ↓
-     output/
-     ├── index.html             # 订阅首页（b2p-gen-index 生成后随 b2p-sync 上传）
-     ├── bilibili-season/{sid}/{bvid}/
-     │   ├── meta.json          # 合集元信息
-     │   ├── videos.json        # 视频列表
-     │   ├── {bvid}.m4a         # 音频
-     │   ├── pic.jpg            # 封面
-     │   └── complete           # 完成标记
-     └── rss/{season|series}/{sid}.xml
-          ↓
-     R2 同步 (boto3) → 通过 RSS_URL_PREFIX 暴露
-          ↓
-     Podcast App 订阅
-```
-
-## ❓ FAQ
-
-**Q：RSS 链接访问不到？**  
-检查 `RSS_URL_PREFIX` 是否与 R2 公开域名一致，R2 需开启 Public URL 或绑自定义域。
-
-**Q：某个视频下载失败？**  
-单视频失败会 skip 并打 error 日志，不会中断整个合集处理。重跑 `b2p-fetch` 即可——已成功的 BV 会自动跳过。
-
-**Q：音频太大？**  
-默认 `worstaudio`（最低码率），单集通常几 MB 到几十 MB。可改 `AUDIO_FORMAT = 'mp3'`（`src/bilibili_podcast/config.py`）。
-
-**Q：能加新的合集吗？**  
-往 `sources.json` 数组里追加一行 URL，重跑 `bash start.sh` 即可。无需重启任何进程。
-
-**Q：怎么自动更新？**  
-用 `b2p-cron`（内置 24h 调度）或用系统 cron / systemd timer 定时跑 `bash start.sh`。仓库已不再包含 GitHub Actions 工作流。
-
-## 🧪 测试
+## 开发
 
 ```bash
 pip install -e ".[dev]"
-pytest
-# 139 passed
+pytest                     # 143 passed
+pyright                    # 可选：类型检查（不在 dev 依赖里，需自行安装）
 ```
 
-## 📋 TODO
+```
+src/bilibili_podcast/
+├── config.py              # 读 config.yaml + 环境变量
+├── config_loader.py       # config.yaml + sources.json → 活动合集列表
+├── extract_url.py         # 合集 URL 解析与校验
+├── storage.py             # S3/R2 镜像（内容比对、Content-Type、并发上传）
+├── rss.py                 # RSS XML 生成（路径全部由 output_root 推导）
+├── xml_template.py        # RSS 模板
+├── logger.py
+├── bilibili/
+│   ├── channel.py         # 合集遍历、视频下载调度
+│   ├── audio.py           # yt-dlp + playurl 兜底、封面下载
+│   ├── credential.py      # Cookie 解析与 yt-dlp 安全副本文档
+│   ├── meta.py            # 本地 JSON 读写
+│   └── retry.py           # 412 / -352 退避重试
+└── cli/                   # 每个 b2p-* 子命令一个模块
+```
 
-- [ ] UP 主全投稿视频
-- [ ] AI 视频总结
-- [ ] 分 P 视频支持
-- [ ] 其他 OSS 扩展（阿里云 OSS、腾讯 COS）
+## 常见问题
 
-## 📄 License
+**Q：`b2p-fetch` 大量 412？**
+匿名访问视频详情接口会被风控。检查 Cookie 是否有效（`SESSDATA` 是否还在），或重新导出登录态 Cookie。日志里出现 `no SESSDATA in ...` 就是在提示这件事。
+
+**Q：RSS 能打开，但 `index.html` 一点就下载？**
+说明对象没有 `ContentType`。用当前版本跑 `b2p-sync` 会补上；旧版本上传的对象需要重传一次。
+
+**Q：桶里内容没更新？**
+`b2p-sync` 用 `Size` 比对，内容变了但大小巧合一致的文件不会自动重传——`rss/**` 和 `index.html` 已强制重传，其它自制文件请确保写入后触发一次修改大小，或临时删除远端对象。
+
+**Q：某个视频下载失败会中断整轮吗？**
+不会。单视频失败只记 error 并跳过（没有 `complete` 就不会进 RSS），重跑 `b2p-fetch` 会自动重试。
+
+**Q：音频太大？**
+默认 `worstaudio`（最低码率）。要换容器改 `src/bilibili_podcast/config.py` 的 `AUDIO_FORMAT`（支持 `m4a` / `mp3` / `opus` / `flac`，RSS 的 `enclosure type` 会自动跟随）。
+
+**Q：description 里没有 AI 总结？**
+B站只为部分视频生成了 AI 总结（本地实测约 85%），取不到时 description 回退到 UP 主简介。没取到结果的视频会在 7 天后自动重试（B站可能事后补生成）；想立刻重抓用 `b2p-summarize --force`。该接口需要登录 Cookie，匿名会返回 -101。
+
+**Q：客户端里看不到章节？**
+章节走 Podcasting 2.0 的 `podcast:chapters` 外链 JSON，Apple Podcasts / Pocket Casts / Overcast / Fountain / Podverse 支持，部分客户端不读该标签。章节文件需要先随 `b2p-sync` 上传到桶里才能被拉到。
+
+**Q：想加/删合集？**
+编辑 `sources.json` 后重跑 `bash start.sh`：新增的会抓全量，删除的会被 `b2p-prune` 清掉本地目录，桶里对应对象在下次 `b2p-sync` 时删除。
+
+**Q：想清空重来？**
+删 `output/` 与桶里的对象即可（桶会按本地状态镜像，删空后同步会把远端也删空，注意别误删其它数据）。
+
+## License
 
 [MIT](LICENSE)
