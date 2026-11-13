@@ -21,6 +21,7 @@ sources.json (合集 URL)
 - 支持 B 站两种合集类型：`season`（合集）与 `series`（系列）
 - 音频默认抽成 `m4a`（最低码率，单集通常几 MB～几十 MB）
 - **幂等可重跑**：每个视频目录下有 `complete` 标记，已成功的不会重复下载
+- **可从对象存储恢复**：`b2p-pull` 把桶里的产物拉回本地 `output/`，不重下音频；配合 `complete` 标记，`b2p-fetch` 不会重复抓取
 - **最新视频聚合流**：`rss/new.xml` 跨多个合集取各自最新 N 个，按发布时间倒序合并
 - **AI 总结与章节**：`rss/new.xml` 的每集描述带 B站官方 AI 总结 + 按时间轴的分章摘要，并输出 Podcasting 2.0 `podcast:chapters`（Apple Podcasts / Pocket Casts / Overcast 可点章节跳转）
 - 同步是**真镜像**：本地有变化就重传、远端多出来的就删除，不会出现「改了但线上没变」
@@ -122,6 +123,7 @@ bash start.sh
 |---|---|---|
 | `b2p-prune` | 删除已不在 `sources.json` 中的合集目录 | `--dry-run`、`--output-root` |
 | `b2p-fetch` | 拉合集元数据 + 逐个视频下载音频 | `--new-top-n`（默认 5）、`--output-root` |
+| `b2p-pull` | 把桶里的产物拉回本地 `output/`（不重下音频） | `--prefix`（可重复）、`--workers`（默认 8）、`--output-root` |
 | `b2p-summarize` | 抓 B站 AI 总结 + 章节（只处理最新视频流） | `--force`、`--retry-days`、`--sleep` |
 | `b2p-rss` | 生成 RSS XML | `--new-top-n`、`--output-root` |
 | `b2p-gen-index` | 生成订阅首页 HTML | `--output`（默认 `<output-root>/index.html`） |
@@ -129,6 +131,8 @@ bash start.sh
 | `b2p-size` | 打印 `output/` 各子目录体积 | `--output-root` |
 | `b2p-cron` | 每 24h 跑一轮 prune→fetch→summarize→rss→gen-index→sync | — |
 | `bash start.sh` | 全流程 + 体积统计 | — |
+| `tools/weekly_run.py` | 跑一轮全流程并输出「日志 + RSS 变化 + 失败分类」的 JSON 汇总 | `--root`、`--keep-snapshots` |
+| `tools/rss_diff.py` | 比较两份 RSS 快照，列出每个 feed 的新增/删除/变更 | `BEFORE_DIR AFTER_DIR` |
 
 所有带 `--config` 的命令默认读 `./config.yaml`。
 
@@ -158,7 +162,10 @@ output/
         └── chapters.json               # podcast:chapters 规范文件（可跳转 B站对应秒）
 ```
 
-只有带 `complete` 的视频才会进入 RSS；缺 `meta.json` 或缺标记的会被跳过并记 warning。
+只有带 `complete` **且音频文件真实存在（且非空）**的视频才会进入 RSS；缺 `meta.json`、缺标记或缺音频的会被跳过并记 warning。
+
+> 早期版本只信 `complete` 标记，导致「有标记但没音频」的视频照样生成 enclosure，客户端点开是 404。现在 `has_video_complete()` 同时校验音频，`b2p-fetch` 也会因此重新下载缺失音频的那一集。
+> 下载过程中的中间产物（`.part` / `.ytdl` / `.m4s`）既不上传也不拉取，避免把截断的片段当成正式剧集发布。
 
 ### 同步规则（`b2p-sync`）
 
@@ -186,11 +193,21 @@ b2p-cron
 0 3 * * * cd /path/to/bilibili-to-podcast && /path/to/.venv/bin/bash start.sh >> log/cron.log 2>&1
 ```
 
+### 每周巡检（带结果汇报）
+
+`tools/weekly_run.py` 在 `start.sh` 外面包了一层：快照 `output/rss` → 跑流水线 → 再快照并 diff，把日志、RSS 变化和失败原因分类（cookie 过期 / 网络问题 / 代码缺陷）整理成 JSON 输出到 `reports/`。
+
+```bash
+.venv/bin/python tools/weekly_run.py
+```
+
+典型用法是配一条外部调度，让 agent 读它的 JSON 汇总：cookie 过期和网络抖动只汇报不修（外部环境问题），只有真正的代码异常才去改代码，改完必须跑 `pytest` 并重跑一次流水线确认。
+
 ## 开发
 
 ```bash
 pip install -e ".[dev]"
-pytest                     # 143 passed
+pytest                     # 201 passed
 pyright                    # 可选：类型检查（不在 dev 依赖里，需自行安装）
 ```
 
@@ -199,7 +216,7 @@ src/bilibili_podcast/
 ├── config.py              # 读 config.yaml + 环境变量
 ├── config_loader.py       # config.yaml + sources.json → 活动合集列表
 ├── extract_url.py         # 合集 URL 解析与校验
-├── storage.py             # S3/R2 镜像（内容比对、Content-Type、并发上传）
+├── storage.py             # S3/R2 镜像与反向拉取（内容比对、Content-Type、并发）
 ├── rss.py                 # RSS XML 生成（路径全部由 output_root 推导）
 ├── xml_template.py        # RSS 模板
 ├── logger.py
@@ -207,9 +224,12 @@ src/bilibili_podcast/
 │   ├── channel.py         # 合集遍历、视频下载调度
 │   ├── audio.py           # yt-dlp + playurl 兜底、封面下载
 │   ├── credential.py      # Cookie 解析与 yt-dlp 安全副本文档
-│   ├── meta.py            # 本地 JSON 读写
+│   ├── meta.py            # 本地 JSON 读写、complete 标记与音频存在性校验
 │   └── retry.py           # 412 / -352 退避重试
-└── cli/                   # 每个 b2p-* 子命令一个模块
+├── cli/                   # 每个 b2p-* 子命令一个模块
+└── tools/                 # 每周巡检辅助脚本（非发布产物）
+    ├── weekly_run.py      # 跑一轮流水线并输出 JSON 汇总
+    └── rss_diff.py        # 比较 RSS 快照，列出新增/删除/变更
 ```
 
 ## 常见问题

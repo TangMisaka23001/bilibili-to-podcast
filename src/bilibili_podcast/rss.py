@@ -93,6 +93,24 @@ def _load_video_meta(root: Path, kind: str, sid: str, bv: str) -> dict:
     return _load_dict(_channel_dir(root, kind, sid) / bv / "meta.json")
 
 
+def _audio_path(root: Path, kind: str, sid: str, bv: str) -> Path:
+    """Local path of a BV's audio — the file an enclosure points at."""
+    return root / _rel(kind, sid, bv, f"{bv}.{AUDIO_FORMAT}")
+
+
+def _has_audio(root: Path, kind: str, sid: str, bv: str) -> bool:
+    """Whether the audio behind an enclosure really is on disk.
+
+    A missing (or empty) audio file means every podcast client gets a 404 for
+    that episode, so such a BV must not be published at all.
+    """
+    path = _audio_path(root, kind, sid, bv)
+    try:
+        return path.is_file() and path.stat().st_size > 0
+    except OSError:
+        return False
+
+
 def _channel_bilibili_link(uid: str, sid: str) -> str:
     return f"https://space.bilibili.com/{uid}/lists/{sid}?type=season"
 
@@ -159,7 +177,7 @@ def _render_item(
     summary: Summary | None = None,
 ) -> str:
     rel_audio = _rel(kind, sid, bv, f"{bv}.{AUDIO_FORMAT}")
-    local_audio = root / rel_audio
+    local_audio = _audio_path(root, kind, sid, bv)
     length = local_audio.stat().st_size if local_audio.exists() else 0
 
     description = video_meta.get("desc", "")
@@ -190,7 +208,15 @@ def _render_item(
 
 
 def _scan_items(root: Path, kind: str, sid: str) -> list[str]:
-    """Items for one season/series sid, skipping BVs whose meta.json is missing."""
+    """Items for one season/series sid.
+
+    A BV is published only when it is actually playable: its ``meta.json``
+    must exist *and* its audio file must be on disk. A ``complete`` sentinel
+    alone does not prove that — the sentinel can outlive the audio (the marker
+    was written while the upload failed, or a pull restored the marker
+    without its audio). Publishing such a BV would give every client a 404
+    for that episode, so it is skipped instead.
+    """
     items: list[str] = []
     for video in _load_videos(root, kind, sid):
         bv = video["bvid"]
@@ -198,6 +224,9 @@ def _scan_items(root: Path, kind: str, sid: str) -> list[str]:
             video_meta = _load_video_meta(root, kind, sid, bv)
         except FileNotFoundError:
             logger.warning(f"===> {kind}: skipping {sid}/{bv} (meta.json missing)")
+            continue
+        if not _has_audio(root, kind, sid, bv):
+            logger.warning(f"===> {kind}: skipping {sid}/{bv} (audio missing)")
             continue
         items.append(_render_item(root, kind, sid, bv, video_meta))
     return items
@@ -250,10 +279,18 @@ def _scan_new_items(root: Path, sids: list[str], top_n: int = 5) -> list[str]:
     newest-first. BVs without a `complete` sentinel (fetch was interrupted /
     failed for that BV) are skipped silently — they have no local m4a so
     emitting an RSS item would point to a 404 on R2.
+
+    A sid whose channel was never fetched locally is skipped as well: the
+    `new` tree may legitimately be absent (e.g. a restore that only pulled
+    the season feeds), and a missing directory must not abort the whole run.
     """
     candidates: list[tuple[int, dict, str]] = []  # (pubdate, video, sid)
     for sid in sids:
-        videos = _load_videos(root, "new", sid)
+        try:
+            videos = _load_videos(root, "new", sid)
+        except FileNotFoundError:
+            logger.warning(f"===> new: skipping {sid} (videos.json missing)")
+            continue
         sorted_videos = sorted(videos, key=lambda v: v.get("pubdate", 0), reverse=True)
         for v in sorted_videos[:top_n]:
             candidates.append((v.get("pubdate", 0), v, sid))
@@ -273,6 +310,9 @@ def _scan_new_items(root: Path, sids: list[str], top_n: int = 5) -> list[str]:
         except FileNotFoundError:
             logger.warning(f"===> new: skipping {sid}/{bv} (meta.json missing)")
             continue
+        if not _has_audio(root, "new", sid, bv):
+            logger.warning(f"===> new: skipping {sid}/{bv} (audio missing)")
+            continue
         summary = load_summary(_channel_dir(root, "new", sid) / bv)
         items.append(_render_item(root, "new", sid, bv, video_meta, summary))
     return items
@@ -282,21 +322,31 @@ def _new_xml(root: Path, sids: list[str], uids: list[str], kinds: list[str], top
     """Build the merged rss/new.xml.
 
     Channel-level fields (author / image / link) are taken from the first
-    sid; items are merged across all sids.
+    sid that has a local meta.json; items are merged across all sids. When no
+    sid was fetched locally the feed still renders, just without channel
+    metadata.
     """
     items = _scan_new_items(root, sids, top_n=top_n)
 
-    if sids:
-        first_meta = _load_dict(_channel_dir(root, "new", sids[0]) / "meta.json")
-        first_kind = kinds[0]
-        first_uid = uids[0]
+    first_index = next(
+        (
+            index
+            for index, sid in enumerate(sids)
+            if (_channel_dir(root, "new", sid) / "meta.json").is_file()
+        ),
+        None,
+    )
+    if first_index is not None:
+        first_meta = _load_dict(_channel_dir(root, "new", sids[first_index]) / "meta.json")
+        first_kind = kinds[first_index]
+        first_uid = uids[first_index]
         author = first_meta.get("upper", {}).get("name") or "Unknown"
         title = "最新视频合集"
         description = title
         link = (
-            _channel_bilibili_link(first_uid, sids[0])
+            _channel_bilibili_link(first_uid, sids[first_index])
             if first_kind == "season"
-            else _series_bilibili_link(first_uid, sids[0])
+            else _series_bilibili_link(first_uid, sids[first_index])
         )
         image = first_meta.get("cover") or first_meta.get("upper", {}).get("face", "")
     else:

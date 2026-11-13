@@ -3,6 +3,11 @@
 After sync() returns, the bucket's keys are exactly the local root's relative
 file paths. Keys are uploaded when local-only, when their size changed, or when
 forced (see ``force_prefixes`` / ``force_keys``); remote-only keys are deleted.
+
+pull() is the inverse direction: it materialises the bucket's keys under a
+local root instead of re-downloading the source material. It never deletes
+locally-only files, so it composes with the fetch pipeline instead of
+replacing it.
 """
 from __future__ import annotations
 
@@ -28,6 +33,13 @@ _MIME_OVERRIDES = {
 }
 _IMMUTABLE_SUFFIXES = (".m4a", ".mp3", ".opus", ".jpg", ".png", ".webp")
 
+#: Intermediate download artefacts that must never be published. yt-dlp leaves
+#: ``.part``/``.ytdl`` behind when a download dies mid-flight, and the
+#: playurl fallback downloads into a ``.m4s`` segment before remuxing it.
+#: Uploading those would put junk in the bucket — a truncated ``.m4s`` next
+#: to the real ``.m4a`` — and every stale object is extra bytes to serve.
+_INTERMEDIATE_SUFFIXES = (".part", ".ytdl", ".m4s")
+
 #: Uploads are network-bound; a small pool keeps a first full sync from
 #: serialising thousands of round trips.
 _UPLOAD_WORKERS = 8
@@ -44,6 +56,16 @@ class SyncResult:
     deleted: list[str] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
     failed: list[str] = field(default_factory=list)
+
+
+@dataclass
+class PullResult:
+    """Outcome of a pull: what was downloaded, skipped, and what failed."""
+
+    downloaded: list[str] = field(default_factory=list)
+    skipped: list[str] = field(default_factory=list)
+    failed: list[str] = field(default_factory=list)
+    bytes_downloaded: int = 0
 
 
 def make_s3_client(
@@ -81,15 +103,29 @@ def _upload_args(key: str) -> dict[str, str]:
     return {"ContentType": _content_type(key), "CacheControl": _cache_control(key)}
 
 
+def _is_intermediate(key: str) -> bool:
+    """Whether a key is a download artefact rather than a publishable file."""
+    return key.endswith(_INTERMEDIATE_SUFFIXES)
+
+
 def _walk_local_keys(local_root: str) -> dict[str, int]:
-    """Map every local file's relative key to its size in bytes."""
+    """Map every local file's relative key to its size in bytes.
+
+    Download artefacts are left out: they are not part of the published
+    output, so they must not be uploaded — and they must not make the
+    bucket keep a stale copy either (see :func:`sync`'s mirror deletion).
+    """
     sizes: dict[str, int] = {}
     for root, _, files in os.walk(local_root):
         for name in files:
             abs_path = os.path.join(root, name)
             rel = os.path.relpath(abs_path, local_root)
+            key = rel.replace(os.sep, "/")
+            if _is_intermediate(key):
+                logger.info(f"===> skipping intermediate file {key}")
+                continue
             try:
-                sizes[rel.replace(os.sep, "/")] = os.path.getsize(abs_path)
+                sizes[key] = os.path.getsize(abs_path)
             except OSError:
                 continue
     return sizes
@@ -165,6 +201,26 @@ def _top_dir(key: str) -> str:
     return key.split("/", 1)[0] if "/" in key else ""
 
 
+def _content_matches(local_path: str, remote_size: int, remote_etag: str) -> bool:
+    """True when the local file is identical to the remote object.
+
+    Size is the cheap first check. Small files are then compared by md5
+    against the S3 ETag, because a one-character edit (a chapters.json first
+    chapter going 1 -> 0) keeps the byte count the same. Objects uploaded in
+    parts carry an ETag with a ``-<part>`` suffix and cannot be compared that
+    way, so those fall back to "same size means unchanged".
+    """
+    try:
+        local_size = os.path.getsize(local_path)
+    except OSError:
+        return False
+    if local_size != remote_size:
+        return False
+    if local_size <= _HASH_SIZE_LIMIT and remote_etag and "-" not in remote_etag:
+        return _md5(local_path) == remote_etag
+    return True
+
+
 def _needs_upload(
     key: str,
     local_path: str,
@@ -181,15 +237,7 @@ def _needs_upload(
         return True
 
     remote_size, remote_etag = remote[key]
-    local_size = os.path.getsize(local_path)
-    if remote_size != local_size:
-        return True
-
-    # 大小相同不等于内容相同：小文件用 md5 和 ETag 比对（多段上传的 ETag 带
-    # "-<part>" 后缀，此时无法直接比 md5，退回到「大小相同视为未变」）。
-    if local_size <= _HASH_SIZE_LIMIT and remote_etag and "-" not in remote_etag:
-        return _md5(local_path) != remote_etag
-    return False
+    return not _content_matches(local_path, remote_size, remote_etag)
 
 
 def sync(
@@ -240,3 +288,132 @@ def sync(
         logger.info(f"===> deleted {key}")
 
     return result
+
+
+#: Downloads are network-bound; a small pool keeps a full restore from
+#: serialising hundreds of round trips.
+_DOWNLOAD_WORKERS = 8
+
+
+def _local_path(local_root: str, key: str) -> str:
+    return os.path.join(local_root, key.replace("/", os.sep))
+
+
+def _download_one(
+    client,
+    bucket_name: str,
+    local_root: str,
+    key: str,
+    remote_size: int,
+) -> int:
+    """Download a single key; returns the number of bytes written.
+
+    The body is streamed into a ``.part`` file and moved into place only after
+    it is complete, so an interrupted run never leaves a truncated file that a
+    later size check would mistake for a complete one.
+    """
+    local_path = _local_path(local_root, key)
+    os.makedirs(os.path.dirname(local_path) or ".", exist_ok=True)
+    part_path = local_path + ".part"
+
+    written = 0
+    response = client.get_object(Bucket=bucket_name, Key=key)
+    body = response["Body"]
+    try:
+        with open(part_path, "wb") as handle:
+            for chunk in body.iter_chunks(chunk_size=_HASH_SIZE_LIMIT):
+                if not chunk:
+                    continue
+                handle.write(chunk)
+                written += len(chunk)
+    finally:
+        body.close()
+
+    if remote_size and written != remote_size:
+        raise RuntimeError(f"incomplete download: {written}/{remote_size} bytes")
+
+    os.replace(part_path, local_path)
+    return written
+
+
+def pull(
+    local_root: str,
+    bucket_name: str,
+    client,
+    prefixes: tuple[str, ...] = (),
+    workers: int = _DOWNLOAD_WORKERS,
+) -> PullResult:
+    """Download the bucket's objects under ``local_root``.
+
+    ``prefixes`` restricts the download to keys starting with one of those
+    prefixes (e.g. ``("bilibili-season/", "rss/")``); an empty tuple pulls
+    everything. Keys whose local file already exists with the same size are
+    skipped, which makes the call safe to repeat after an interrupted run.
+
+    Unlike :func:`sync` this never deletes local files that the bucket does
+    not have: the bucket is a cache of the published output, not the source of
+    truth for a fresh local tree.
+    """
+    remote = _list_remote(client, bucket_name)
+    keys = sorted(
+        key
+        for key, (_size, _etag) in remote.items()
+        if not prefixes or key.startswith(prefixes)
+    )
+    keys = [key for key in keys if not _is_intermediate(key)]
+
+    to_download: list[tuple[str, int]] = []
+    to_skip: list[str] = []
+    for key in keys:
+        size, etag = remote[key]
+        if _content_matches(_local_path(local_root, key), size, etag):
+            to_skip.append(key)
+        else:
+            to_download.append((key, size))
+
+    downloaded: list[str] = []
+    failed: list[str] = []
+    total_bytes = 0
+
+    def fetch(item: tuple[str, int]) -> tuple[str, int]:
+        key, size = item
+        return key, _download_one(client, bucket_name, local_root, key, size)
+
+    if workers <= 1 or len(to_download) <= 1:
+        for item in to_download:
+            try:
+                key, written = fetch(item)
+            except Exception as e:
+                logger.error(f"===> failed to download {item[0]}: {e}")
+                failed.append(item[0])
+            else:
+                downloaded.append(key)
+                total_bytes += written
+                logger.info(f"===> downloaded {key}")
+        return PullResult(
+            downloaded=sorted(downloaded),
+            skipped=sorted(to_skip),
+            failed=sorted(failed),
+            bytes_downloaded=total_bytes,
+        )
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(fetch, item): item for item in to_download}
+        for future in as_completed(futures):
+            key = futures[future][0]
+            try:
+                _, written = future.result()
+            except Exception as e:
+                logger.error(f"===> failed to download {key}: {e}")
+                failed.append(key)
+            else:
+                downloaded.append(key)
+                total_bytes += written
+                logger.info(f"===> downloaded {key}")
+
+    return PullResult(
+        downloaded=sorted(downloaded),
+        skipped=sorted(to_skip),
+        failed=sorted(failed),
+        bytes_downloaded=total_bytes,
+    )

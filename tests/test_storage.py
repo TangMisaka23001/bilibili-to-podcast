@@ -156,3 +156,33 @@ def test_force_suffix_uploads_even_when_content_identical(s3, tmp_path: Path):
 
     assert result.uploaded == ["bilibili-new/1/BV1/chapters.json"]
     assert result.skipped == []
+
+
+# --- 中间产物不上传 ---
+
+def test_sync_skips_intermediate_download_files(s3, tmp_path: Path):
+    """.part/.ytdl/.m4s 是下载中间物，不该进桶。"""
+    _write(tmp_path, "a/BV1.m4a", b"audio")
+    _write(tmp_path, "a/BV1.part", b"partial")
+    _write(tmp_path, "a/BV1.ytdl", b"partial")
+    _write(tmp_path, "a/BV1.30216.m4s", b"segment")
+
+    result = sync(str(tmp_path), "bucket", s3)
+
+    assert result.uploaded == ["a/BV1.m4a"]
+    keys = [
+        obj["Key"]
+        for obj in s3.list_objects_v2(Bucket="bucket").get("Contents", [])
+    ]
+    assert keys == ["a/BV1.m4a"]
+
+
+def test_sync_deletes_stale_intermediate_objects(s3, tmp_path: Path):
+    """桶里已有的中间产物也要被镜像删除掉。"""
+    s3.put_object(Bucket="bucket", Key="a/BV1.m4a", Body=b"audio")
+    s3.put_object(Bucket="bucket", Key="a/BV1.30216.m4s", Body=b"stale-segment")
+    _write(tmp_path, "a/BV1.m4a", b"audio")
+
+    result = sync(str(tmp_path), "bucket", s3)
+
+    assert result.deleted == ["a/BV1.30216.m4s"]

@@ -95,6 +95,7 @@ def test_download_audio_removes_stale_partials(tmp_path: Path):
         video_dir / "BV1.part",
         video_dir / "BV1.f30216.part",
         video_dir / "BV1.ytdl",
+        video_dir / "BV1.30216.m4s",
     ]
     for path in stale:
         path.write_bytes(b"partial")

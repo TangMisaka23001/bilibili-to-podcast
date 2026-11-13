@@ -46,9 +46,12 @@ def _remove_stale_partials(video_dir: Path, bv: str) -> None:
     """Drop leftover partial downloads for ``bv``.
 
     A stale ``.part`` from a failed attempt (or from a previous format) would
-    otherwise be resumed by yt-dlp and poison the next download.
+    otherwise be resumed by yt-dlp and poison the next download. The playurl
+    fallback's ``.m4s`` segment counts too: it is only a staging file for the
+    remux, so a leftover one is dead weight that would be published as a
+    truncated episode next to the real ``.m4a``.
     """
-    for pattern in (f"{bv}*.part", f"{bv}*.ytdl"):
+    for pattern in (f"{bv}*.part", f"{bv}*.ytdl", f"{bv}*.m4s"):
         for path in video_dir.glob(pattern):
             logger.info(f"===> removing stale partial {path}")
             path.unlink(missing_ok=True)

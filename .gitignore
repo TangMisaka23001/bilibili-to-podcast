@@ -163,6 +163,7 @@ cython_debug/
 
 log
 output/
+reports/
 
 config.yaml
 cookie

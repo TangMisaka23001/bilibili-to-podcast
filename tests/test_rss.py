@@ -12,6 +12,16 @@ def _write_json(path: Path, data: dict | list) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False))
 
 
+def _write_audio(video_dir: Path, bv: str) -> None:
+    """Create the audio file an enclosure points at.
+
+    The RSS generator only publishes a BV whose audio is really on disk, so
+    every fixture that expects an item needs one.
+    """
+    video_dir.mkdir(parents=True, exist_ok=True)
+    (video_dir / f"{bv}.m4a").write_bytes(b"fake-m4a-data" * 100)
+
+
 def _setup_season_channel(base: str, sid: str, videos: list[dict]) -> None:
     ch = Path(base) / sid
     _write_json(ch / "meta.json", {
@@ -32,6 +42,7 @@ def _setup_season_channel(base: str, sid: str, videos: list[dict]) -> None:
             "duration": v.get("duration", 0),
             "pubdate": v.get("pubdate", 0),
         })
+        _write_audio(ch / bv, bv)
         (ch / bv / "complete").touch()
 
 
@@ -55,6 +66,7 @@ def _setup_series_channel(base: str, sid: str, videos: list[dict]) -> None:
             "duration": v.get("duration", 0),
             "pubdate": v.get("pubdate", 0),
         })
+        _write_audio(ch / bv, bv)
         (ch / bv / "complete").touch()
 
 
@@ -131,6 +143,7 @@ def test_generate_season_tolerates_missing_video_meta_fields(monkeypatch, tmp_pa
     _write_json(ch / "videos.json", [{"bvid": "BV1thin"}])
     # meta.json only has bvid — every other field missing
     _write_json(ch / "BV1thin" / "meta.json", {"bvid": "BV1thin"})
+    _write_audio(ch / "BV1thin", "BV1thin")
     (ch / "BV1thin" / "complete").touch()
 
     monkeypatch.setattr(rss, "RSS_URL_PREFIX", "https://podcast.example.com/")
@@ -160,9 +173,7 @@ def test_generate_series_tolerates_missing_video_meta_fields(monkeypatch, tmp_pa
     _write_json(ch / "videos.json", [{"bvid": "BV2thin"}])
     # meta.json only has bvid
     _write_json(ch / "BV2thin" / "meta.json", {"bvid": "BV2thin"})
-    audio_dir = tmp_path / "output" / "bilibili-series" / sid / "BV2thin"
-    audio_dir.mkdir(parents=True)
-    (audio_dir / "BV2thin.m4a").write_text("fake" * 100)
+    _write_audio(ch / "BV2thin", "BV2thin")
 
     monkeypatch.setattr(rss, "RSS_URL_PREFIX", "https://podcast.example.com/")
     monkeypatch.setattr(rss, "AUDIO_FORMAT", "m4a")
@@ -181,9 +192,6 @@ def test_generate_series_creates_rss_xml(monkeypatch, tmp_path: Path):
     _setup_series_channel(str(base), sid, [
         {"bvid": "BV2cc", "title": "剧集一", "desc": "desc", "pic": "https://i.example.com/3.jpg", "duration": 789, "pubdate": 1700002000},
     ])
-    audio_dir = tmp_path / "output" / "bilibili-series" / sid / "BV2cc"
-    audio_dir.mkdir(parents=True)
-    (audio_dir / "BV2cc.m4a").write_text("fake-m4a-data" * 500)
 
     monkeypatch.setattr(rss, "RSS_URL_PREFIX", "https://podcast.example.com/")
     monkeypatch.setattr(rss, "AUDIO_FORMAT", "m4a")
@@ -216,9 +224,6 @@ def test_generate_both_season_and_series(monkeypatch, tmp_path: Path):
     _setup_series_channel(str(xbase), "20", [
         {"bvid": "BV4ee", "title": "X1", "desc": "", "pic": "", "duration": 2, "pubdate": 2},
     ])
-    audio_dir = tmp_path / "output" / "bilibili-series" / "20" / "BV4ee"
-    audio_dir.mkdir(parents=True)
-    (audio_dir / "BV4ee.m4a").touch()
 
     monkeypatch.setattr(rss, "RSS_URL_PREFIX", "https://p.example.com/")
     monkeypatch.setattr(rss, "AUDIO_FORMAT", "m4a")
@@ -272,6 +277,7 @@ def _setup_new_channel(base: str, sid: str, videos: list[dict], kind: str = "sea
             "duration": v.get("duration", 0),
             "pubdate": v.get("pubdate", 0),
         })
+        _write_audio(ch / bv, bv)
         (ch / bv / "complete").touch()
 
 
@@ -483,3 +489,100 @@ def test_summary_is_ignored_for_season_feeds(monkeypatch, tmp_path: Path):
     assert "<description>原简介</description>" in xml
     assert "七名登山客" not in xml
     assert "podcast:chapters" not in xml
+
+
+# --- 缺音频的条目不发布 ---
+
+def test_generate_season_skips_bv_without_audio(monkeypatch, tmp_path: Path):
+    """A BV whose audio is gone must not get an enclosure — it would 404."""
+    base = tmp_path / "bilibili-season"
+    _setup_season_channel(str(base), "598034", [
+        {"bvid": "BVok", "title": "OK", "desc": "", "pic": "", "duration": 1, "pubdate": 1},
+        {"bvid": "BVnoaudio", "title": "NOAUDIO", "desc": "", "pic": "", "duration": 2, "pubdate": 2},
+    ])
+    (base / "598034" / "BVnoaudio" / "BVnoaudio.m4a").unlink()
+
+    monkeypatch.setattr(rss, "RSS_URL_PREFIX", "https://p.example.com/")
+    monkeypatch.setattr(rss, "AUDIO_FORMAT", "m4a")
+
+    rss.generate({"season": [{"uid": "1", "sid": "598034"}]}, str(tmp_path))
+
+    xml = (tmp_path / "rss" / "season" / "598034.xml").read_text()
+    assert "<title>OK</title>" in xml
+    assert "<title>NOAUDIO</title>" not in xml
+    assert "BVnoaudio" not in xml
+
+
+def test_generate_season_skips_bv_with_empty_audio(monkeypatch, tmp_path: Path):
+    """A zero-byte audio file is as broken as a missing one."""
+    base = tmp_path / "bilibili-season"
+    _setup_season_channel(str(base), "598034", [
+        {"bvid": "BVempty", "title": "EMPTY", "desc": "", "pic": "", "duration": 1, "pubdate": 1},
+    ])
+    (base / "598034" / "BVempty" / "BVempty.m4a").write_bytes(b"")
+
+    monkeypatch.setattr(rss, "RSS_URL_PREFIX", "https://p.example.com/")
+    monkeypatch.setattr(rss, "AUDIO_FORMAT", "m4a")
+
+    rss.generate({"season": [{"uid": "1", "sid": "598034"}]}, str(tmp_path))
+
+    xml = (tmp_path / "rss" / "season" / "598034.xml").read_text()
+    assert "<title>EMPTY</title>" not in xml
+
+
+def test_generate_new_skips_bv_without_audio(monkeypatch, tmp_path: Path):
+    """Same rule for the merged new feed."""
+    base = tmp_path / "bilibili-new"
+    _setup_new_channel(str(base), "100", [
+        {"bvid": "BVok", "title": "OK", "pubdate": 1700000200, "duration": 1, "pic": ""},
+        {"bvid": "BVnoaudio", "title": "NOAUDIO", "pubdate": 1700000300, "duration": 1, "pic": ""},
+    ])
+    (base / "100" / "BVnoaudio" / "BVnoaudio.m4a").unlink()
+
+    _patch_urls(monkeypatch)
+
+    rss.generate({"season": [], "series": [], "new": [{"uid": "1", "sid": "100", "type": "season"}]},
+                 str(tmp_path))
+
+    xml = (tmp_path / "rss" / "new.xml").read_text()
+    assert "<title>OK</title>" in xml
+    assert "<title>NOAUDIO</title>" not in xml
+
+
+# --- 缺 bilibili-new/ 目录时不能崩 ---
+
+def test_generate_new_tolerates_missing_channel_dir(monkeypatch, tmp_path: Path):
+    """The `new` tree may be absent entirely (e.g. a restore of season feeds only)."""
+    _patch_urls(monkeypatch)
+
+    config = {"season": [], "series": [], "new": [{"uid": "1", "sid": "100", "type": "season"}]}
+    # Must not raise
+    rss.generate(config, str(tmp_path))
+
+    xml = (tmp_path / "rss" / "new.xml").read_text()
+    assert "<title>最新视频合集</title>" in xml
+    assert "<item>" not in xml
+
+
+def test_generate_new_tolerates_partial_channel_dirs(monkeypatch, tmp_path: Path):
+    """One sid present, one missing — the present one still publishes."""
+    base = tmp_path / "bilibili-new"
+    _setup_new_channel(str(base), "100", [
+        {"bvid": "BVok", "title": "OK", "pubdate": 1700000200, "duration": 1, "pic": ""},
+    ])
+
+    _patch_urls(monkeypatch)
+
+    config = {
+        "season": [],
+        "series": [],
+        "new": [
+            {"uid": "1", "sid": "100", "type": "season"},
+            {"uid": "2", "sid": "200", "type": "season"},
+        ],
+    }
+    rss.generate(config, str(tmp_path))
+
+    xml = (tmp_path / "rss" / "new.xml").read_text()
+    assert "<title>OK</title>" in xml
+    assert "<itunes:author>UPnew100</itunes:author>" in xml

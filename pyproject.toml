@@ -13,6 +13,10 @@ dependencies = [
     "PyYAML>=6.0",
     "yt-dlp>=2026.8.19",
     "schedule>=1.2",
+    # HTTP 后端：vendored bilibili-api fork 需要 curl_cffi|httpx|aiohttp 之一，
+    # 否则任何 bilibili_api 调用都会抛「尚未安装第三方请求库」。
+    # 选 curl_cffi 是因为 B站风控依赖 TLS 指纹伪装，httpx/aiohttp 更容易触发 -352/412。
+    "curl_cffi>=0.7",
 ]
 # NOTE: bilibili-api fork 以 vendor.tar.gz 分发，需在安装本项目前单独安装：
 #   tar -xzf vendor.tar.gz && pip install -e ./vendor/bilibili-api-main
@@ -27,6 +31,7 @@ dev = [
 [project.scripts]
 b2p-prune = "bilibili_podcast.cli.prune:main"
 b2p-sync  = "bilibili_podcast.cli.sync:main"
+b2p-pull  = "bilibili_podcast.cli.pull:main"
 b2p-fetch = "bilibili_podcast.cli.fetch:main"
 b2p-rss   = "bilibili_podcast.cli.rss_cmd:main"
 b2p-summarize = "bilibili_podcast.cli.summarize:main"
