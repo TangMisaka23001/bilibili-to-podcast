@@ -16,7 +16,8 @@ logger = get_logger()
 RETRY_ATTEMPTS = 3
 RETRY_BASE_DELAY = 1.0
 _RETRYABLE_HTTP_STATUS = frozenset({412, 429})
-_RETRYABLE_API_CODES = frozenset({-352, -412})
+# -352/-412 是风控；-503 是 B 站服务端临时不可用，属于同类的"稍后重试"。
+_RETRYABLE_API_CODES = frozenset({-352, -412, -503})
 
 
 def is_retryable(exc: Exception) -> bool:

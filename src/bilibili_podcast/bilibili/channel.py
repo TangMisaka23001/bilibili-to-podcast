@@ -260,9 +260,21 @@ def fetch_all_new(
     refs: list[ChannelRef], output_root: PathLike = Path("output"), top_n: int = 5
 ) -> None:
     for ref in refs:
-        fetch_new(ref, output_root, top_n=top_n)
+        _run_channel(ref, lambda r: fetch_new(r, output_root, top_n=top_n))
 
 
 def fetch_all(refs: list[ChannelRef], output_root: PathLike = Path("output")) -> None:
     for ref in refs:
-        fetch_one(ref, output_root)
+        _run_channel(ref, lambda r: fetch_one(r, output_root))
+
+
+def _run_channel(ref: ChannelRef, action) -> None:
+    """Run one channel's fetch, keeping a failure local to that channel.
+
+    B 站 API 会零星返回 -503 之类的临时错误；单个合集拉取失败不该让整轮
+    fetch 中断，否则后面的合集全都不会被处理。
+    """
+    try:
+        action(ref)
+    except Exception as exc:
+        logger.error(f"===> failed to fetch channel {ref.type.value}/{ref.sid}: {exc}")

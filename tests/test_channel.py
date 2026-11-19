@@ -7,7 +7,7 @@ from unittest.mock import patch, MagicMock, call
 
 import pytest
 
-from bilibili_api.exceptions import NetworkException
+from bilibili_api.exceptions import NetworkException, ResponseCodeException
 
 from bilibili_podcast.bilibili.retry import with_retry as _with_retry
 from bilibili_podcast.bilibili.channel import (
@@ -337,3 +337,32 @@ def test_with_retry_gives_up_after_attempts():
     with pytest.raises(NetworkException):
         _run(_with_retry(call, attempts=3, base_delay=0, sleep=fake_sleep))
     assert len(calls) == 3
+
+
+def test_with_retry_retries_service_unavailable():
+    """-503 是 B 站服务端临时不可用，应该重试而不是直接失败。"""
+    calls: list[int] = []
+
+    async def call():
+        calls.append(1)
+        if len(calls) < 2:
+            raise ResponseCodeException(-503, "服务暂不可用", {})
+        return "ok"
+
+    async def fake_sleep(_seconds):
+        return None
+
+    assert _run(_with_retry(call, base_delay=0, sleep=fake_sleep)) == "ok"
+    assert len(calls) == 2
+
+
+def test_fetch_all_keeps_going_when_one_channel_fails(tmp_path: Path):
+    """单个合集拉取失败不应该中断整轮 fetch。"""
+    refs = [SEASON_REF, SERIES_REF]
+
+    def fake_fetch(ref, _output_root):
+        if ref is SEASON_REF:
+            raise RuntimeError("-503 服务暂不可用")
+
+    with patch("bilibili_podcast.bilibili.channel.fetch_one", side_effect=fake_fetch):
+        fetch_all(refs, output_root=tmp_path)  # 不应抛异常
