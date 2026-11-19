@@ -12,6 +12,7 @@ from bilibili_api.channel_series import (
     ChannelSeries,
     ChannelSeriesType,
 )
+from botocore.exceptions import ClientError
 
 from bilibili_podcast.bilibili.audio import download_audio, download_picture
 from bilibili_podcast.bilibili.credential import load_credential
@@ -24,8 +25,14 @@ from bilibili_podcast.bilibili.meta import (
 )
 from bilibili_podcast.bilibili.retry import with_retry as _with_retry
 from bilibili_podcast.logger import get_logger
+from bilibili_podcast.store import StorePath, remove_tree
 
 logger = get_logger()
+
+#: 本地后端是 ``pathlib.Path``，对象存储后端是 ``S3Path``；两者都能 ``/``、
+#: ``mkdir``、``iterdir``、``exists``、``read_text``，因此同一份逻辑可以在两种
+#: 后端上跑。
+PathLike = Path | StorePath
 
 
 class ChannelType(str, Enum):
@@ -93,11 +100,11 @@ def _order(t: ChannelType) -> ChannelOrder:
     )
 
 
-def _channel_dir(output_root: Path, ref: ChannelRef) -> Path:
+def _channel_dir(output_root: PathLike, ref: ChannelRef) -> PathLike:
     return output_root / f"bilibili-{ref.type.value}" / ref.sid
 
 
-def _new_dir(output_root: Path, ref: ChannelRef) -> Path:
+def _new_dir(output_root: PathLike, ref: ChannelRef) -> PathLike:
     return output_root / "bilibili-new" / ref.sid
 
 
@@ -141,7 +148,7 @@ def fetch_video_info(bv: str) -> dict:
     return info
 
 
-def _load_video_record_from_cache(channel_dir: Path, bv: str) -> dict | None:
+def _load_video_record_from_cache(channel_dir: PathLike, bv: str) -> dict | None:
     """Find a videos.json record matching `bv` in `channel_dir`."""
     import json
 
@@ -159,7 +166,7 @@ def _load_video_record_from_cache(channel_dir: Path, bv: str) -> dict | None:
     return None
 
 
-def fetch_video_info_with_fallback(bv: str, channel_dir: Path) -> dict:
+def fetch_video_info_with_fallback(bv: str, channel_dir: PathLike) -> dict:
     """Fetch video info, falling back to channel_dir/videos.json on API failure."""
     try:
         return fetch_video_info(bv)
@@ -178,7 +185,7 @@ def fetch_video_info_with_fallback(bv: str, channel_dir: Path) -> dict:
         return cached
 
 
-def _fetch_video_into(channel_dir: Path, ref: ChannelRef, bv: str, log_prefix: str = "") -> None:
+def _fetch_video_into(channel_dir: PathLike, ref: ChannelRef, bv: str, log_prefix: str = "") -> None:
     """Fetch one BV into ``channel_dir``; a failure skips the BV, never the run."""
     if has_video_complete(channel_dir, bv):
         logger.info(f"===> {log_prefix}{bv} complete, skipping")
@@ -196,7 +203,7 @@ def _fetch_video_into(channel_dir: Path, ref: ChannelRef, bv: str, log_prefix: s
         logger.error(f"===> {log_prefix}failed {bv}: {e}")
 
 
-def fetch_one(ref: ChannelRef, output_root: Path) -> None:
+def fetch_one(ref: ChannelRef, output_root: PathLike) -> None:
     channel_dir = _channel_dir(output_root, ref)
     channel_dir.mkdir(parents=True, exist_ok=True)
     _warn_if_no_credential()
@@ -212,15 +219,13 @@ def fetch_one(ref: ChannelRef, output_root: Path) -> None:
         _fetch_video_into(channel_dir, ref, video["bvid"])
 
 
-def fetch_new(ref: ChannelRef, output_root: Path, top_n: int = 5) -> None:
+def fetch_new(ref: ChannelRef, output_root: PathLike, top_n: int = 5) -> None:
     """Fetch only the newest `top_n` videos of the channel into bilibili-new/.
 
     Always re-evaluates the top-N (sorted by videos.json pubdate desc). Already
     complete entries are skipped; entries that fell out of the top-N are pruned
     so the directory only ever holds the current top-N.
     """
-    import shutil
-
     channel_dir = _new_dir(output_root, ref)
     channel_dir.mkdir(parents=True, exist_ok=True)
     _warn_if_no_credential()
@@ -240,8 +245,9 @@ def fetch_new(ref: ChannelRef, output_root: Path, top_n: int = 5) -> None:
         if entry.name in top_bvs or not entry.is_dir():
             continue
         try:
-            shutil.rmtree(entry)
-        except OSError as e:
+            remove_tree(entry)
+        except (OSError, ClientError) as e:
+            # 本地后端抛 OSError；对象存储后端抛 botocore ClientError。
             logger.warning(f"===> failed to prune {entry.name}: {e}")
             continue
         logger.info(f"===> pruned {entry.name} (no longer in top {top_n})")
@@ -250,11 +256,13 @@ def fetch_new(ref: ChannelRef, output_root: Path, top_n: int = 5) -> None:
         _fetch_video_into(channel_dir, ref, video["bvid"], log_prefix="new: ")
 
 
-def fetch_all_new(refs: list[ChannelRef], output_root: Path = Path("output"), top_n: int = 5) -> None:
+def fetch_all_new(
+    refs: list[ChannelRef], output_root: PathLike = Path("output"), top_n: int = 5
+) -> None:
     for ref in refs:
         fetch_new(ref, output_root, top_n=top_n)
 
 
-def fetch_all(refs: list[ChannelRef], output_root: Path = Path("output")) -> None:
+def fetch_all(refs: list[ChannelRef], output_root: PathLike = Path("output")) -> None:
     for ref in refs:
         fetch_one(ref, output_root)

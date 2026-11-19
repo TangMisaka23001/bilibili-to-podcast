@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import argparse
 import time
-from pathlib import Path
+from typing import Any
 
 from bilibili_api.exceptions import ResponseCodeException
 
@@ -19,17 +19,25 @@ from bilibili_podcast.bilibili.summary import (
     summarize_video,
 )
 from bilibili_podcast.config import AUDIO_FORMAT
+from bilibili_podcast.config_loader import add_backend_argument, load_active_config
 from bilibili_podcast.logger import get_logger
+from bilibili_podcast.store import resolve_root
 
 logger = get_logger()
 
 
-def _video_dirs(root: Path) -> list[Path]:
+def _video_dirs(root: Any) -> list[Any]:
+    """列出 ``bilibili-new/{sid}/{bvid}/`` 里带 meta.json 的视频目录。
+
+    本地下是 ``pathlib.Path``，远端下是 ``S3Path``；两者的 ``glob`` 语义一致
+    （``*`` 不跨 ``/``），所以同一个模式两边通用。
+    """
     return sorted(p for p in root.glob("*/*") if (p / "meta.json").is_file())
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Fetch B站 AI summaries for bilibili-new")
+    parser.add_argument("--config", default="config.yaml")
     parser.add_argument("--output-root", default="output")
     parser.add_argument("--force", action="store_true", help="忽略已有结果，全部重抓")
     parser.add_argument(
@@ -44,9 +52,11 @@ def main(argv: list[str] | None = None) -> int:
         default=0.6,
         help="每个视频之间的间隔秒数，用来避开风控",
     )
+    add_backend_argument(parser)
     args = parser.parse_args(argv)
 
-    root = Path(args.output_root) / "bilibili-new"
+    config = load_active_config(args.config)
+    root = resolve_root(config, args.output_root, args.backend) / "bilibili-new"
     if not root.is_dir():
         logger.info(f"===> {root} not found, nothing to summarize")
         return 0

@@ -26,13 +26,22 @@ source "$VENV/bin/activate"
 
 cd "$ROOT"
 
+# 存储后端：local（本地 output/）或 s3 / r2（直连对象存储，本地不留产物）。
+# 不设时由 config.yaml 的 storage.backend / B2P_STORAGE_BACKEND 决定。
+BACKEND="${B2P_STORAGE_BACKEND:-}"
+CONFIG="${B2P_CONFIG_PATH:-$ROOT/config.yaml}"
+
 STAGES=(b2p-prune b2p-fetch b2p-summarize b2p-rss b2p-gen-index b2p-sync b2p-size)
 STATUS=()
 FAILED=0
 
 for stage in "${STAGES[@]}"; do
     echo "===> stage: $stage"
-    "$stage"
+    if [ -n "$BACKEND" ]; then
+        "$stage" --config "$CONFIG" --backend "$BACKEND"
+    else
+        "$stage" --config "$CONFIG"
+    fi
     code=$?
     STATUS+=("$stage=$code")
     if [ $code -ne 0 ]; then

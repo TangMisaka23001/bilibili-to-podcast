@@ -1,10 +1,11 @@
-"""b2p-rss: generate RSS XML feeds from local output/."""
+"""b2p-rss: generate RSS XML feeds from the output/ artifacts."""
 from __future__ import annotations
 
 import argparse
 
-from bilibili_podcast.config_loader import load_active_config
+from bilibili_podcast.config_loader import add_backend_argument, load_active_config
 from bilibili_podcast.rss import generate
+from bilibili_podcast.store import resolve_root
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -17,10 +18,12 @@ def main(argv: list[str] | None = None) -> int:
         default=5,
         help="Number of newest videos per new-array sid to include in rss/new.xml",
     )
+    add_backend_argument(parser)
     args = parser.parse_args(argv)
 
     config = load_active_config(args.config)
-    generate(config, output_root=args.output_root, top_n=args.new_top_n)
+    root = resolve_root(config, args.output_root, args.backend)
+    generate(config, output_root=root, top_n=args.new_top_n)
     return 0
 
 

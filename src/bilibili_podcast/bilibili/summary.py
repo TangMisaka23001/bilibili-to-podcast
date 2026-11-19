@@ -26,13 +26,20 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from bilibili_api import video as video_api
+from botocore.exceptions import ClientError
 
 from bilibili_podcast.bilibili.credential import load_credential
 from bilibili_podcast.bilibili.retry import with_retry
 from bilibili_podcast.config import bilibili_link_prefix
 from bilibili_podcast.logger import get_logger
+from bilibili_podcast.store import StorePath, is_remote, stage_for
 
 logger = get_logger()
+
+#: 本地后端是 ``pathlib.Path``，对象存储后端是 ``S3Path``；两者都能 ``/``、
+#: ``is_file()``、``read_text()``、``write_text()``、``unlink()``，因此同一份
+#: 逻辑可以在两种后端上跑。
+PathLike = Path | StorePath
 
 SUMMARY_FILE = "summary.json"
 CHAPTERS_FILE = "chapters.json"
@@ -236,13 +243,14 @@ def chapters_payload(summary: Summary, bv: str) -> dict:
     }
 
 
-def load_summary(video_dir: Path) -> Summary | None:
+def load_summary(video_dir: PathLike) -> Summary | None:
     path = video_dir / SUMMARY_FILE
     if not path.is_file():
         return None
     try:
         return from_payload(json.loads(path.read_text(encoding="utf-8")))
-    except (OSError, json.JSONDecodeError, TypeError, ValueError) as e:
+    except (OSError, ClientError, json.JSONDecodeError, TypeError, ValueError) as e:
+        # 对象存储后端抛 botocore ClientError（不是 OSError 子类）。
         logger.warning(f"===> ignoring unreadable {path}: {e}")
         return None
 
@@ -281,24 +289,12 @@ def _audio_duration(path: Path) -> float:
         return 0.0
 
 
-def embed_chapters(video_dir: Path, bv: str, audio_format: str) -> bool:
-    """把章节写进音频文件本身（MP4 chapter track）。
+def _embed_chapters_local(audio: Path, summary: Summary, bv: str) -> bool:
+    """在本地音频文件上写入章节，返回是否改写成功。
 
-    RSS 的 `<podcast:chapters>` 只有 iOS/iPadOS 26.2+ 才读，文件内嵌章节从
-    2005 年起所有版本都认——这是「别人的播客都能看到时间轴」的原因。
-    只 remux 不重编码，返回 True 表示文件被改写。
+    ``audio`` 必须是真实本地路径：ffmpeg 要就地重写它（先写 ``.tmp`` 再
+    ``replace`` 回原位），所以对象存储后端要先把它拉到本地工作目录。
     """
-    audio = video_dir / f"{bv}.{audio_format}"
-    summary = load_summary(video_dir)
-    if summary is None or not summary.chapters or not audio.is_file():
-        return False
-
-    payload = json.dumps(chapters_payload(summary, bv), ensure_ascii=False)
-    marker = video_dir / EMBED_MARKER
-    digest = hashlib.new("md5", payload.encode("utf-8"), usedforsecurity=False).hexdigest()
-    if marker.is_file() and marker.read_text(encoding="utf-8").strip() == digest:
-        return False
-
     duration = _audio_duration(audio)
     if duration <= 0:
         logger.warning(f"===> {bv}: cannot read audio duration, skip chapter embedding")
@@ -324,25 +320,68 @@ def embed_chapters(video_dir: Path, bv: str, audio_format: str) -> bool:
             out_tmp.unlink(missing_ok=True)
             logger.error(f"===> {bv}: failed to embed chapters: {e}")
             return False
+    return True
+
+
+def embed_chapters(video_dir: PathLike, bv: str, audio_format: str) -> bool:
+    """把章节写进音频文件本身（MP4 chapter track）。
+
+    RSS 的 `<podcast:chapters>` 只有 iOS/iPadOS 26.2+ 才读，文件内嵌章节从
+    2005 年起所有版本都认——这是「别人的播客都能看到时间轴」的原因。
+    只 remux 不重编码，返回 True 表示文件被改写。
+
+    本地后端：直接在 ``video_dir`` 里改写音频，行为与改造前完全一致。
+    对象存储后端：远端对象不能就地重写，所以先拉到本地临时目录做 remux，
+    再把成品音频上传回去。
+    """
+    audio = video_dir / f"{bv}.{audio_format}"
+    summary = load_summary(video_dir)
+    if summary is None or not summary.chapters or not audio.is_file():
+        return False
+
+    payload = json.dumps(chapters_payload(summary, bv), ensure_ascii=False)
+    marker = video_dir / EMBED_MARKER
+    digest = hashlib.new("md5", payload.encode("utf-8"), usedforsecurity=False).hexdigest()
+    if marker.is_file() and marker.read_text(encoding="utf-8").strip() == digest:
+        return False
+
+    if is_remote(video_dir):
+        # 对象存储：拉音频到本地工作目录 → remux → 传回同一个 key。
+        with stage_for(video_dir) as stage:
+            try:
+                local_audio = stage.fetch(audio.name, audio)
+            except (OSError, ClientError) as e:
+                logger.error(f"===> {bv}: cannot fetch audio for chapter embedding: {e}")
+                return False
+            if not _embed_chapters_local(local_audio, summary, bv):
+                return False
+            try:
+                stage.put(local_audio)
+            except (OSError, ClientError) as e:
+                logger.error(f"===> {bv}: cannot upload audio with chapters: {e}")
+                return False
+    else:
+        if not _embed_chapters_local(Path(audio), summary, bv):
+            return False
 
     marker.write_text(digest, encoding="utf-8")
     logger.info(f"===> {bv}: embedded {len(public_chapters(summary))} chapters into audio")
     return True
 
 
-def _write_if_changed(path: Path, text: str) -> bool:
+def _write_if_changed(path: PathLike, text: str) -> bool:
     """内容一致就不重写——避免每轮跑出新的 mtime/size 触发 R2 重传。"""
     if path.is_file():
         try:
             if path.read_text(encoding="utf-8") == text:
                 return False
-        except OSError as e:
+        except (OSError, ClientError) as e:
             logger.debug(f"===> cannot read {path} for comparison, rewriting: {e}")
     path.write_text(text, encoding="utf-8")
     return True
 
 
-def write_summary(video_dir: Path, summary: Summary, *, bv: str) -> None:
+def write_summary(video_dir: PathLike, summary: Summary, *, bv: str) -> None:
     """落盘 summary.json / chapters.json；渲染规则变化时下一次运行会自愈。"""
     video_dir.mkdir(parents=True, exist_ok=True)
     _write_if_changed(
@@ -370,7 +409,7 @@ def _is_fresh(summary: Summary, now: datetime, retry_days: int) -> bool:
 
 
 def summarize_video(
-    video_dir: Path,
+    video_dir: PathLike,
     *,
     force: bool = False,
     retry_days: int = RETRY_AFTER_DAYS,
@@ -385,7 +424,7 @@ def summarize_video(
         return None
     try:
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as e:
+    except (OSError, ClientError, json.JSONDecodeError) as e:
         logger.warning(f"===> cannot read {meta_path}: {e}")
         return None
 

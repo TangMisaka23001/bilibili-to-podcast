@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 
 from bilibili_podcast.bilibili.channel import (
     ChannelRef,
@@ -10,7 +9,8 @@ from bilibili_podcast.bilibili.channel import (
     fetch_all,
     fetch_all_new,
 )
-from bilibili_podcast.config_loader import load_active_config
+from bilibili_podcast.config_loader import add_backend_argument, load_active_config
+from bilibili_podcast.store import resolve_root
 
 
 def _refs(config: dict, key: str) -> list[ChannelRef]:
@@ -34,10 +34,11 @@ def main(argv: list[str] | None = None) -> int:
         default=5,
         help="Number of newest videos per new-array sid to fetch",
     )
+    add_backend_argument(parser)
     args = parser.parse_args(argv)
 
     config = load_active_config(args.config)
-    output_root = Path(args.output_root)
+    output_root = resolve_root(config, args.output_root, args.backend)
 
     # `all` — fetch every video, full pipeline (season + series).
     fetch_all(_refs(config, "season") + _refs(config, "series"), output_root=output_root)

@@ -12,14 +12,21 @@ import yt_dlp
 from yt_dlp.utils import DownloadError
 from bilibili_api import video as video_api
 
+from bilibili_podcast import config as _config
 from bilibili_podcast.bilibili.credential import load_credential, materialize_cookie_file
+from bilibili_podcast.bilibili.loudness import normalize_loudness
 from bilibili_podcast.config import AUDIO_FORMAT, bilibili_link_prefix
 from bilibili_podcast.logger import get_logger
+from bilibili_podcast.store import StorePath, is_remote, stage_for
 
 if TYPE_CHECKING:
     from bilibili_podcast.bilibili.channel import ChannelRef
 
 logger = get_logger()
+
+#: 本地后端是 ``pathlib.Path``，对象存储后端是 ``S3Path``；两者都能 ``/``、
+#: ``write_bytes``，所以同一份代码可以在两种后端上跑。
+PathLike = Path | StorePath
 
 #: yt-dlp format selectors, smallest (cheapest) first. A CDN object can contain a
 #: corrupt byte range that answers HTTP 503 forever, which no retry can get past —
@@ -178,20 +185,42 @@ def _download_via_playurl(bv: str, video_dir: Path) -> None:
     raise RuntimeError(f"no playurl mirror delivered {bv}") from last_error
 
 
-def download_audio(ref: "ChannelRef", bv: str, video_dir: Path) -> None:
+def _normalize_if_enabled(path: Path) -> Path:
+    """Normalize a freshly downloaded file when the feature is enabled.
+
+    The switch is read at call time (``config.NORMALIZE_LOUDNESS``) instead of
+    at import time so a config reload or an env override takes effect without
+    restarting the process.
+    """
+    if not _config.NORMALIZE_LOUDNESS:
+        return path
+    try:
+        normalize_loudness(path)
+    except Exception as exc:  # pragma: no cover - defensive, ffmpeg failures
+        logger.warning(f"===> {path.name}: loudness normalization skipped: {exc}")
+    return path
+
+
+def _download_audio_local(ref: "ChannelRef", bv: str, work_dir: Path) -> Path:
+    """Download and extract ``bv``'s audio into ``work_dir``; return the .m4a.
+
+    ``work_dir`` is always a real local directory — yt-dlp and ffmpeg cannot
+    work on an object-storage key. The caller owns the staging directory and
+    uploads the finished file back to the backend (see :func:`download_audio`).
+    """
     url = bilibili_link_prefix + bv
     last_error: Exception | None = None
     cookie_file, is_temporary = materialize_cookie_file()
 
     try:
         for fmt in AUDIO_FORMAT_FALLBACKS:
-            _remove_stale_partials(video_dir, bv)
+            _remove_stale_partials(work_dir, bv)
             opts = {
                 "format": fmt,
                 "postprocessors": [
                     {"key": "FFmpegExtractAudio", "preferredcodec": AUDIO_FORMAT}
                 ],
-                "outtmpl": str(video_dir / bv),
+                "outtmpl": str(work_dir / bv),
                 "cookiefile": cookie_file,
                 "retries": 10,
                 "fragment_retries": 10,
@@ -202,8 +231,8 @@ def download_audio(ref: "ChannelRef", bv: str, video_dir: Path) -> None:
                     ydl.download([url])
                 if last_error is not None:
                     logger.warning(f"===> {bv}: succeeded with fallback format {fmt}")
-                _remove_stale_partials(video_dir, bv)
-                return
+                _remove_stale_partials(work_dir, bv)
+                return _normalize_if_enabled(work_dir / f"{bv}.{AUDIO_FORMAT}")
             except DownloadError as e:
                 last_error = e
                 logger.warning(f"===> {bv}: format {fmt} failed, trying next: {str(e)[:120]}")
@@ -213,16 +242,42 @@ def download_audio(ref: "ChannelRef", bv: str, video_dir: Path) -> None:
 
     logger.warning(f"===> {bv}: all yt-dlp formats failed, trying playurl mirrors")
     try:
-        _download_via_playurl(bv, video_dir)
+        _download_via_playurl(bv, work_dir)
     except Exception as fallback_error:
         logger.error(f"===> {bv}: playurl mirror fallback failed: {fallback_error}")
         raise last_error from fallback_error  # type: ignore[misc]
-    _remove_stale_partials(video_dir, bv)
+    _remove_stale_partials(work_dir, bv)
     logger.warning(f"===> {bv}: succeeded via playurl mirror")
+    return _normalize_if_enabled(work_dir / f"{bv}.{AUDIO_FORMAT}")
 
 
-def download_picture(pic_url: str, dest: Path) -> None:
+def download_audio(ref: "ChannelRef", bv: str, video_dir: PathLike) -> None:
+    """Download ``bv``'s audio into ``video_dir``.
+
+    本地后端：直接在 ``video_dir`` 里下载，行为与改造前完全一致。
+    对象存储后端：yt-dlp / ffmpeg 必须拿到真实本地文件，所以先在临时工作
+    目录里下载与转码，再把成品 .m4a 上传回 ``video_dir``。
+    """
+    if not is_remote(video_dir):
+        _download_audio_local(ref, bv, Path(video_dir))
+        return
+
+    with stage_for(video_dir) as stage:
+        local = _download_audio_local(ref, bv, stage.path)
+        if not local.is_file():
+            raise RuntimeError(f"audio download produced no file for {bv}")
+        stage.put(local)
+
+
+def download_picture(pic_url: str, dest: PathLike) -> None:
     """Download a cover image; fails loudly rather than saving an error page."""
     response = requests.get(pic_url, headers=_CDN_HEADERS, timeout=(10, 60))
     response.raise_for_status()
-    dest.write_bytes(response.content)
+    if not is_remote(dest):
+        dest.write_bytes(response.content)
+        return
+    # 对象存储：先落本地临时文件，再上传到目标 key。
+    with stage_for(dest.parent) as stage:
+        local = stage.path / dest.name
+        local.write_bytes(response.content)
+        stage.put_at(dest.name, local)

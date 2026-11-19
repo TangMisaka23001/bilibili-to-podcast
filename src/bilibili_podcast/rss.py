@@ -24,6 +24,7 @@ from bilibili_podcast.config import (
     bilibili_link_prefix,
 )
 from bilibili_podcast.logger import get_logger
+from bilibili_podcast.store import S3Path, StorePath, as_root
 from bilibili_podcast.xml_template import (
     channel_template,
     feed_xml_template,
@@ -31,6 +32,10 @@ from bilibili_podcast.xml_template import (
 )
 
 logger = get_logger()
+
+#: 根路径句柄。本地是 ``pathlib.Path``，对象存储是 ``S3Path``——两者支持
+#: 同一套操作，所以本模块的代码在两种后端上完全一致。
+Root = Path | StorePath
 
 #: Directory name per feed kind. The same string is the R2 key prefix.
 _KIND_DIR = {
@@ -57,7 +62,7 @@ def _channel_sid_list_from(config: dict, kind: str) -> list[str]:
     return [str(c["sid"]) for c in config.get(kind, [])]
 
 
-def _channel_dir(root: Path, kind: str, sid: str) -> Path:
+def _channel_dir(root: Root, kind: str, sid: str) -> Root:
     return root / _KIND_DIR[kind] / sid
 
 
@@ -65,11 +70,31 @@ def _rel(kind: str, *parts: str) -> str:
     return "/".join((_KIND_DIR[kind], *parts))
 
 
-def _load_json(path: Path) -> dict | list:
+def _warm(root: Root, prefix: str) -> None:
+    """把前缀下的对象大小批量拉进后端缓存。
+
+    对象存储没有「目录」概念，逐个 ``stat()`` 会变成 N 次 head_object 往返；
+    一次 ``list_objects`` 就能填满缓存，后续 ``is_file()`` / ``stat()`` 全部
+    命中本地缓存。本地后端没有 ``store``，直接跳过。
+    """
+    store = getattr(root, "store", None)
+    if store is None:
+        return
+    base = str(root).strip("/")
+    store.list_objects(f"{base}/{prefix}" if base else prefix)
+
+
+def _write_text(path: Root, text: str) -> None:
+    """写文本文件：本地先建父目录，远端的 ``mkdir`` 是空操作。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def _load_json(path: Root) -> dict | list:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _load_dict(path: Path) -> dict:
+def _load_dict(path: Root) -> dict:
     """Read a JSON object; a wrong shape is a loud error, not a silent skip."""
     data = _load_json(path)
     if not isinstance(data, dict):
@@ -77,7 +102,7 @@ def _load_dict(path: Path) -> dict:
     return data
 
 
-def _load_list(path: Path) -> list[dict]:
+def _load_list(path: Root) -> list[dict]:
     """Read a JSON array of objects; a wrong shape is a loud error."""
     data = _load_json(path)
     if not isinstance(data, list):
@@ -85,20 +110,20 @@ def _load_list(path: Path) -> list[dict]:
     return data
 
 
-def _load_videos(root: Path, kind: str, sid: str) -> list[dict]:
+def _load_videos(root: Root, kind: str, sid: str) -> list[dict]:
     return _load_list(_channel_dir(root, kind, sid) / "videos.json")
 
 
-def _load_video_meta(root: Path, kind: str, sid: str, bv: str) -> dict:
+def _load_video_meta(root: Root, kind: str, sid: str, bv: str) -> dict:
     return _load_dict(_channel_dir(root, kind, sid) / bv / "meta.json")
 
 
-def _audio_path(root: Path, kind: str, sid: str, bv: str) -> Path:
-    """Local path of a BV's audio — the file an enclosure points at."""
+def _audio_path(root: Root, kind: str, sid: str, bv: str) -> Root:
+    """Path of a BV's audio — the file an enclosure points at."""
     return root / _rel(kind, sid, bv, f"{bv}.{AUDIO_FORMAT}")
 
 
-def _has_audio(root: Path, kind: str, sid: str, bv: str) -> bool:
+def _has_audio(root: Root, kind: str, sid: str, bv: str) -> bool:
     """Whether the audio behind an enclosure really is on disk.
 
     A missing (or empty) audio file means every podcast client gets a 404 for
@@ -169,7 +194,7 @@ def _description_with_summary(bv: str, summary: Summary) -> str:
 
 
 def _render_item(
-    root: Path,
+    root: Root,
     kind: str,
     sid: str,
     bv: str,
@@ -207,7 +232,7 @@ def _render_item(
     )
 
 
-def _scan_items(root: Path, kind: str, sid: str) -> list[str]:
+def _scan_items(root: Root, kind: str, sid: str) -> list[str]:
     """Items for one season/series sid.
 
     A BV is published only when it is actually playable: its ``meta.json``
@@ -218,6 +243,8 @@ def _scan_items(root: Path, kind: str, sid: str) -> list[str]:
     for that episode, so it is skipped instead.
     """
     items: list[str] = []
+    # 一次性拉下整个频道目录的对象大小，避免逐个 stat() 打网络往返
+    _warm(root, _rel(kind, sid))
     for video in _load_videos(root, kind, sid):
         bv = video["bvid"]
         try:
@@ -232,7 +259,7 @@ def _scan_items(root: Path, kind: str, sid: str) -> list[str]:
     return items
 
 
-def _channel_xml(root: Path, channel: str) -> str:
+def _channel_xml(root: Root, channel: str) -> str:
     meta = _load_dict(_channel_dir(root, "season", channel) / "meta.json")
     channel_string = Template(channel_template).substitute(
         {
@@ -249,7 +276,7 @@ def _channel_xml(root: Path, channel: str) -> str:
     return Template(feed_xml_template).substitute({"channel": channel_string})
 
 
-def _series_xml(root: Path, series: str) -> str:
+def _series_xml(root: Root, series: str) -> str:
     meta = _load_dict(_channel_dir(root, "series", series) / "meta.json")
     series_string = Template(channel_template).substitute(
         {
@@ -266,12 +293,12 @@ def _series_xml(root: Path, series: str) -> str:
     return Template(feed_xml_template).substitute({"channel": series_string})
 
 
-def _has_complete(root: Path, sid: str, bv: str) -> bool:
+def _has_complete(root: Root, sid: str, bv: str) -> bool:
     """Whether the BV has a `complete` sentinel, meaning fetch succeeded."""
     return (_channel_dir(root, "new", sid) / bv / "complete").exists()
 
 
-def _scan_new_items(root: Path, sids: list[str], top_n: int = 5) -> list[str]:
+def _scan_new_items(root: Root, sids: list[str], top_n: int = 5) -> list[str]:
     """Merge the top-N newest videos across the given new-sids, return RSS item XML.
 
     For each sid, take the top_n by videos.json pubdate desc; then merge
@@ -286,6 +313,8 @@ def _scan_new_items(root: Path, sids: list[str], top_n: int = 5) -> list[str]:
     """
     candidates: list[tuple[int, dict, str]] = []  # (pubdate, video, sid)
     for sid in sids:
+        # 先把该 sid 目录下的对象大小一次性拉进缓存，后续 stat() 不打网络
+        _warm(root, _rel("new", sid))
         try:
             videos = _load_videos(root, "new", sid)
         except FileNotFoundError:
@@ -318,7 +347,7 @@ def _scan_new_items(root: Path, sids: list[str], top_n: int = 5) -> list[str]:
     return items
 
 
-def _new_xml(root: Path, sids: list[str], uids: list[str], kinds: list[str], top_n: int = 5) -> str:
+def _new_xml(root: Root, sids: list[str], uids: list[str], kinds: list[str], top_n: int = 5) -> str:
     """Build the merged rss/new.xml.
 
     Channel-level fields (author / image / link) are taken from the first
@@ -371,21 +400,40 @@ def _new_xml(root: Path, sids: list[str], uids: list[str], kinds: list[str], top
     return Template(feed_xml_template).substitute({"channel": channel_string})
 
 
-def generate(config: dict, output_root: str | Path = "output", top_n: int = 5) -> None:
-    root = Path(output_root)
+def generate(
+    config: dict,
+    output_root: str | Path | S3Path = "output",
+    top_n: int = 5,
+) -> None:
+    """生成 RSS 产物。
+
+    ``output_root`` 既可以是本地目录（``str`` / ``Path``），也可以是对象存储
+    的根句柄（``S3Path``）——产物 key 恒等于相对该根的路径。
+    """
+    root = as_root(output_root)
     rss_dir = root / "rss"
     rss_dir.mkdir(parents=True, exist_ok=True)
 
     for channel in _channel_sid_list_from(config, "season"):
-        (rss_dir / "season").mkdir(parents=True, exist_ok=True)
         out_path = rss_dir / "season" / f"{channel}.xml"
-        out_path.write_text(_channel_xml(root, channel), encoding="utf-8")
+        try:
+            body = _channel_xml(root, channel)
+        except FileNotFoundError:
+            # 合集从未抓取过（或已被 prune），没有 meta.json 就没法渲染，
+            # 跳过这一个合集，不该让整轮 RSS 失败。
+            logger.warning(f"===> season: skipping {channel} (meta.json missing)")
+            continue
+        _write_text(out_path, body)
         logger.info(f"===> wrote {out_path}")
 
     for series in _channel_sid_list_from(config, "series"):
-        (rss_dir / "series").mkdir(parents=True, exist_ok=True)
         out_path = rss_dir / "series" / f"{series}.xml"
-        out_path.write_text(_series_xml(root, series), encoding="utf-8")
+        try:
+            body = _series_xml(root, series)
+        except FileNotFoundError:
+            logger.warning(f"===> series: skipping {series} (meta.json missing)")
+            continue
+        _write_text(out_path, body)
         logger.info(f"===> wrote {out_path}")
 
     new_refs = config.get("new", [])
@@ -394,7 +442,5 @@ def generate(config: dict, output_root: str | Path = "output", top_n: int = 5) -
         uids = [str(c["uid"]) for c in new_refs]
         kinds = [c["type"] for c in new_refs]
         out_path = rss_dir / "new.xml"
-        out_path.write_text(
-            _new_xml(root, sids, uids, kinds, top_n=top_n), encoding="utf-8"
-        )
+        _write_text(out_path, _new_xml(root, sids, uids, kinds, top_n=top_n))
         logger.info(f"===> wrote {out_path}")

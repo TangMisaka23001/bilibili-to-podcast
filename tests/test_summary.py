@@ -5,6 +5,9 @@ import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import pytest
+from moto import mock_aws
+
 from bilibili_podcast.bilibili.summary import (
     CHAPTERS_FILE,
     MAX_CHAPTERS,
@@ -21,6 +24,7 @@ from bilibili_podcast.bilibili.summary import (
     summarize_video,
     write_summary,
 )
+from bilibili_podcast.store import S3Store
 
 RAW_OK = {
     "code": 0,
@@ -48,6 +52,36 @@ RAW_OK = {
 def _video_dir(tmp_path: Path, *, bvid="BV1xx", cid=42, mid=7) -> Path:
     vdir = tmp_path / "bilibili-new" / "100" / bvid
     vdir.mkdir(parents=True)
+    (vdir / "meta.json").write_text(
+        json.dumps({"bvid": bvid, "cid": cid, "owner": {"mid": mid}}), encoding="utf-8"
+    )
+    return vdir
+
+
+# --- 对象存储后端 ---
+
+
+BUCKET = "summary-bucket"
+
+
+@pytest.fixture
+def s3_client():
+    with mock_aws():
+        import boto3
+
+        client = boto3.client("s3", region_name="us-east-1")
+        client.create_bucket(Bucket=BUCKET)
+        yield client
+
+
+@pytest.fixture
+def s3_store(s3_client):
+    return S3Store(BUCKET, s3_client)
+
+
+def _remote_video_dir(store: S3Store, *, bvid="BV1xx", cid=42, mid=7):
+    vdir = store.root() / "bilibili-new" / "100" / bvid
+    vdir.mkdir(parents=True, exist_ok=True)
     (vdir / "meta.json").write_text(
         json.dumps({"bvid": bvid, "cid": cid, "owner": {"mid": mid}}), encoding="utf-8"
     )
@@ -334,6 +368,131 @@ def test_embed_chapters_skips_when_no_chapters(tmp_path: Path, monkeypatch):
     from bilibili_podcast.bilibili import summary as mod
 
     vdir = _video_dir(tmp_path)
+    write_summary(vdir, Summary(source="none", code=1), bv="BV1xx")
+    (vdir / "BV1xx.m4a").write_bytes(b"audio")
+    called: list = []
+    monkeypatch.setattr(mod.subprocess, "run", lambda *a, **k: called.append(a))
+
+    assert mod.embed_chapters(vdir, "BV1xx", "m4a") is False
+    assert called == []
+
+
+# --- 对象存储后端 ---
+
+
+def test_remote_write_and_load_roundtrip(s3_store):
+    vdir = _remote_video_dir(s3_store)
+    summary = normalize(RAW_OK, fetched_at="2026-11-12T02:00:00+00:00")
+
+    write_summary(vdir, summary, bv="BV1xx")
+
+    assert (vdir / SUMMARY_FILE).is_file()
+    assert (vdir / CHAPTERS_FILE).is_file()
+    assert load_summary(vdir) == summary
+
+
+def test_remote_write_removes_stale_chapters_file(s3_store):
+    vdir = _remote_video_dir(s3_store)
+    (vdir / CHAPTERS_FILE).write_text("{}")
+
+    write_summary(vdir, Summary(source="none", code=1), bv="BV1xx")
+
+    assert not (vdir / CHAPTERS_FILE).exists()
+
+
+def test_remote_load_summary_returns_none_on_broken_json(s3_store):
+    vdir = _remote_video_dir(s3_store)
+    (vdir / SUMMARY_FILE).write_text("not json")
+    assert load_summary(vdir) is None
+
+
+def test_remote_summarize_video_fetches_once_then_reuses(s3_store, monkeypatch):
+    from bilibili_podcast.bilibili import summary as mod
+
+    vdir = _remote_video_dir(s3_store)
+    calls: list[tuple] = []
+
+    def fake_fetch(bv, cid, up_mid):
+        calls.append((bv, cid, up_mid))
+        return RAW_OK
+
+    monkeypatch.setattr(mod, "fetch_conclusion", fake_fetch)
+
+    first = summarize_video(vdir)
+    second = summarize_video(vdir)
+
+    assert first is not None and first.available
+    assert second == first
+    assert calls == [("BV1xx", 42, 7)]
+    assert (vdir / SUMMARY_FILE).is_file()
+    assert (vdir / CHAPTERS_FILE).is_file()
+
+
+def test_remote_summarize_video_returns_none_without_meta(s3_store):
+    vdir = s3_store.root() / "bilibili-new" / "100" / "BVempty"
+    assert summarize_video(vdir) is None
+
+
+def test_remote_embed_chapters_writes_marker_and_replaces_audio(s3_store, monkeypatch):
+    from bilibili_podcast.bilibili import summary as mod
+
+    vdir = _remote_video_dir(s3_store)
+    write_summary(vdir, normalize(RAW_OK, fetched_at="now"), bv="BV1xx")
+    audio = vdir / "BV1xx.m4a"
+    audio.write_bytes(b"fake-audio")
+
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        if cmd[0] == "ffprobe":
+            class R:
+                stdout = "3600.0\n"
+            return R()
+        # ffmpeg：把输出文件造出来，模拟 remux 成功
+        Path(cmd[-1]).write_bytes(b"muxed")
+        class R:
+            stdout = ""
+        return R()
+
+    monkeypatch.setattr(mod.subprocess, "run", fake_run)
+
+    assert mod.embed_chapters(vdir, "BV1xx", "m4a") is True
+    # marker 落在远端
+    assert (vdir / mod.EMBED_MARKER).is_file()
+    # 成品音频被传回同一个 key
+    assert audio.read_bytes() == b"muxed"
+    ffmpeg_cmd = next(c for c in calls if c[0] == "ffmpeg")
+    assert "-map_chapters" in ffmpeg_cmd and "copy" in ffmpeg_cmd
+    # 中间产物（remux 用的 .tmp）不能留在桶里
+    assert sorted(s3_store.list_objects("")) == [
+        "bilibili-new/100/BV1xx/BV1xx.m4a",
+        "bilibili-new/100/BV1xx/chapters.embedded",
+        "bilibili-new/100/BV1xx/chapters.json",
+        "bilibili-new/100/BV1xx/meta.json",
+        "bilibili-new/100/BV1xx/summary.json",
+    ]
+
+    # 幂等：章节没变就不重复 mux
+    assert mod.embed_chapters(vdir, "BV1xx", "m4a") is False
+
+
+def test_remote_embed_chapters_skips_without_audio(s3_store, monkeypatch):
+    from bilibili_podcast.bilibili import summary as mod
+
+    vdir = _remote_video_dir(s3_store)
+    write_summary(vdir, normalize(RAW_OK, fetched_at="now"), bv="BV1xx")
+    called: list = []
+    monkeypatch.setattr(mod.subprocess, "run", lambda *a, **k: called.append(a))
+
+    assert mod.embed_chapters(vdir, "BV1xx", "m4a") is False
+    assert called == []
+
+
+def test_remote_embed_chapters_skips_when_no_chapters(s3_store, monkeypatch):
+    from bilibili_podcast.bilibili import summary as mod
+
+    vdir = _remote_video_dir(s3_store)
     write_summary(vdir, Summary(source="none", code=1), bv="BV1xx")
     (vdir / "BV1xx.m4a").write_bytes(b"audio")
     called: list = []

@@ -12,10 +12,14 @@ from pathlib import Path
 
 from bilibili_api.channel_series import ChannelSeries, ChannelSeriesType
 
-from bilibili_podcast.config_loader import load_active_config
+from bilibili_podcast.config_loader import add_backend_argument, load_active_config
 from bilibili_podcast.logger import get_logger
+from bilibili_podcast.store import S3Path, StorePath, as_root, resolve_root
 
 logger = get_logger()
+
+#: 根路径句柄。本地是 ``pathlib.Path``，对象存储是 ``S3Path``。
+Root = Path | StorePath
 
 _IMAGE_PROXY = "https://images.weserv.nl/?url="
 
@@ -45,12 +49,14 @@ def _fetch_meta(sid: str, uid: str, kind: str) -> dict:
     return asyncio.run(cs.get_meta())
 
 
-def _load_latest(sid: str, kind: str, output_root: Path = Path("output")) -> tuple[str, str, str]:
-    """Read the newest video's title + ISO date + cover URL from local videos.json.
+def _load_latest(
+    sid: str, kind: str, output_root: Root = Path("output")
+) -> tuple[str, str, str]:
+    """Read the newest video's title + ISO date + cover URL from videos.json.
 
     Returns ("", "", "") when the file is missing (e.g. fetch hasn't run for this sid).
     """
-    path = output_root / f"bilibili-{kind}" / sid / "videos.json"
+    path = as_root(output_root) / f"bilibili-{kind}" / sid / "videos.json"
     if not path.is_file():
         return "", "", ""
     try:
@@ -69,20 +75,19 @@ def _load_latest(sid: str, kind: str, output_root: Path = Path("output")) -> tup
     return newest.get("title", ""), date_str, newest.get("pic", "")
 
 
-def _load_new_global_latest(output_root: Path = Path("output")) -> tuple[str, str, str]:
+def _load_new_global_latest(output_root: Root = Path("output")) -> tuple[str, str, str]:
     """Across all bilibili-new/{sid}/videos.json, find the single newest video.
 
     Used by the rss/new.xml banner. Returns ("", "", "") if no new sid has
     any videos.json (or none has a positive pubdate).
     """
-    base = output_root / "bilibili-new"
-    if not base.is_dir():
-        return "", "", ""
     best: tuple[int, dict] | None = None
-    for sid_dir in base.iterdir():
-        if not sid_dir.is_dir():
-            continue
-        path = sid_dir / "videos.json"
+    # 只扫 bilibili-new/{sid}/videos.json：``*`` 不跨目录分隔符，挂在
+    # bilibili-new 下的 ``*/videos.json`` 恰好是一层 sid。作用域限定在
+    # bilibili-new 是必要的——``bilibili-season/{sid}/videos.json`` 也是三层
+    # 路径，放开就会把 season/series 的视频混进「最新视频合集」横幅；
+    # 顺带把远端列举范围收窄到这个前缀。
+    for path in (as_root(output_root) / "bilibili-new").glob("*/videos.json"):
         if not path.is_file():
             continue
         try:
@@ -110,7 +115,7 @@ _META_WORKERS = 4
 
 
 def _entry_from_meta(
-    kind: str, sid: str, uid: str, meta: dict, prefix: str, output_root: Path
+    kind: str, sid: str, uid: str, meta: dict, prefix: str, output_root: Root
 ) -> _Entry:
     if kind == "season":
         title = meta.get("title") or f"合集 {sid}"
@@ -266,7 +271,7 @@ def _html(entry_list: list[_Entry], banner_html: str = "") -> str:
 
 
 def _build_entries(
-    specs: list[tuple[str, str, str]], prefix: str, output_root: Path
+    specs: list[tuple[str, str, str]], prefix: str, output_root: Root
 ) -> list[_Entry]:
     """Fetch channel metas concurrently, keeping config order."""
     if not specs:
@@ -279,34 +284,45 @@ def _build_entries(
     ]
 
 
-def generate(config_path: str, output: str, output_root: str | Path = "output") -> None:
+def generate(
+    config_path: str,
+    output: str | Path | S3Path,
+    output_root: str | Path | S3Path = "output",
+) -> None:
+    """生成 index.html。
+
+    ``output_root`` 与 ``output`` 都支持本地路径和对象存储句柄：产物 key
+    恒等于相对 ``output_root`` 的路径。
+    """
     config = load_active_config(config_path)
     prefix = config["RSS_URL_PREFIX"].rstrip("/")
+    root = as_root(output_root)
 
     specs = [
         (kind, str(c["sid"]), str(c["uid"]))
         for kind in ("season", "series")
         for c in config.get(kind, [])
     ]
-    entries = _build_entries(specs, prefix, Path(output_root))
+    entries = _build_entries(specs, prefix, root)
 
     banner = (
         _banner_html(
             prefix,
             config.get("new", []),
-            latest_pic=_load_new_global_latest(Path(output_root))[2],
+            latest_pic=_load_new_global_latest(root)[2],
         )
         if config.get("new")
         else ""
     )
-    Path(output).parent.mkdir(parents=True, exist_ok=True)
-    Path(output).write_text(_html(entries, banner_html=banner), encoding="utf-8")
+    out_path = as_root(output)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(_html(entries, banner_html=banner), encoding="utf-8")
     logger.info(f"===> wrote {output} ({len(entries)} entries, banner={'yes' if banner else 'no'})")
 
 
-def _default_output(output_root: str) -> Path:
+def _default_output(output_root: str | Path | S3Path) -> Root:
     """Put index.html inside output/ so `b2p-sync` mirrors it to R2/OSS in the same run."""
-    return Path(output_root) / "index.html"
+    return as_root(output_root) / "index.html"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -317,9 +333,12 @@ def main(argv: list[str] | None = None) -> int:
                              "and the default home of the generated index.html")
     parser.add_argument("--output", default=None,
                         help="HTML output path (default: <output-root>/index.html)")
+    add_backend_argument(parser)
     args = parser.parse_args(argv)
-    output = args.output or str(_default_output(args.output_root))
-    generate(args.config, output, output_root=args.output_root)
+    config = load_active_config(args.config)
+    root = resolve_root(config, args.output_root, args.backend)
+    output = args.output or (root / "index.html")
+    generate(args.config, output, output_root=root)
     return 0
 
 

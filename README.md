@@ -16,10 +16,23 @@ sources.json (合集 URL)
         └─ b2p-size       打印本轮磁盘占用
 ```
 
+### 两种存储模式
+
+| 模式 | 后端 | 本地磁盘 | 适用场景 |
+|---|---|---|---|
+| `local`（默认） | 本地目录 `output/` | 保留全部产物 | 本地调试、离线分析 |
+| `s3` / `r2` | 对象存储（Cloudflare R2 或任意 S3 兼容服务） | **只保留临时工作目录**，跑完即删 | 常驻机器、磁盘紧张的服务器 |
+
+直连模式下所有文件读写直接打对象存储：`b2p-fetch` 把音频下载到临时目录处理完就上传，
+`b2p-rss` 直接把 XML 写进桶，`b2p-gen-index` 直接写 `index.html`。本地不再留 `output/`，
+`b2p-sync` 变成空操作（没有「本地→远端」这一步了）。
+
 ## 特性
 
 - 支持 B 站两种合集类型：`season`（合集）与 `series`（系列）
 - 音频默认抽成 `m4a`（最低码率，单集通常几 MB～几十 MB）
+- **两种存储后端**：`local` 保留本地 `output/`；`s3`/`r2` 直连对象存储，本地只留临时工作目录（跑完即删），省掉「下载到本地再同步上传」的两段式
+- **响度归一化**：新下载的音频自动用 ffmpeg `loudnorm` 归一化到 −16 LUFS（Apple Podcasts 标准），车上收听不用再手动调音量
 - **幂等可重跑**：每个视频目录下有 `complete` 标记，已成功的不会重复下载
 - **可从对象存储恢复**：`b2p-pull` 把桶里的产物拉回本地 `output/`，不重下音频；配合 `complete` 标记，`b2p-fetch` 不会重复抓取
 - **最新视频聚合流**：`rss/new.xml` 跨多个合集取各自最新 N 个，按发布时间倒序合并
@@ -86,16 +99,29 @@ URL 必须形如 `https://space.bilibili.com/{uid}/lists/{sid}?type=season|serie
 ```yaml
 RSS_URL_PREFIX: https://podcast.example.com/   # 必须以 / 结尾；等于桶的公开域名
 
+# 存储后端：local（默认，本地 output/）或 s3 / r2（直连对象存储）
+storage:
+  backend: r2
+  prefix: ""            # 可选：桶内的子前缀，留空表示用桶根
+
 R2:
   ACCESS_KEY: xxxxxxxx
   SECRET_KEY: xxxxxxxx
   ENDPOINT_URL: https://<account-id>.r2.cloudflarestorage.com
   BUCKET_NAME: bilibili-podcast
+
+# 音频响度归一化（可选，默认开启）
+audio:
+  normalize_loudness: true
 ```
 
 > `config.yaml` 与 `cookie` 都在 `.gitignore` 里，不要提交。
 > `b2p-sync` **只从 `config.yaml` 的 `R2` 段读凭据**，环境变量不会生效。
 > 想放到别处：`export B2P_CONFIG_PATH=/path/to/config.yaml`（`sources.json` 需与它同目录）。
+> `storage.backend` 也可以用环境变量覆盖：`export B2P_STORAGE_BACKEND=s3`；
+> 每条命令还有 `--backend local|s3|r2` 参数，优先级高于环境变量与配置。
+> 响度归一化可用 `export B2P_NORMALIZE_LOUDNESS=0` 临时关闭。
+
 
 ### 5. 放 Cookie
 
@@ -121,15 +147,15 @@ bash start.sh
 
 | 命令 | 作用 | 常用参数 |
 |---|---|---|
-| `b2p-prune` | 删除已不在 `sources.json` 中的合集目录 | `--dry-run`、`--output-root` |
-| `b2p-fetch` | 拉合集元数据 + 逐个视频下载音频 | `--new-top-n`（默认 5）、`--output-root` |
+| `b2p-prune` | 删除已不在 `sources.json` 中的合集目录，以及它们留下的孤儿 feed | `--dry-run`、`--output-root`、`--backend` |
+| `b2p-fetch` | 拉合集元数据 + 逐个视频下载音频 | `--new-top-n`（默认 5）、`--output-root`、`--backend` |
 | `b2p-pull` | 把桶里的产物拉回本地 `output/`（不重下音频） | `--prefix`（可重复）、`--workers`（默认 8）、`--output-root` |
-| `b2p-summarize` | 抓 B站 AI 总结 + 章节（只处理最新视频流） | `--force`、`--retry-days`、`--sleep` |
-| `b2p-rss` | 生成 RSS XML | `--new-top-n`、`--output-root` |
-| `b2p-gen-index` | 生成订阅首页 HTML | `--output`（默认 `<output-root>/index.html`） |
-| `b2p-sync` | 把 `output/` 镜像到桶 | `--output-root` |
-| `b2p-size` | 打印 `output/` 各子目录体积 | `--output-root` |
-| `b2p-cron` | 每 24h 跑一轮 prune→fetch→summarize→rss→gen-index→sync | — |
+| `b2p-summarize` | 抓 B站 AI 总结 + 章节（只处理最新视频流） | `--force`、`--retry-days`、`--sleep`、`--backend` |
+| `b2p-rss` | 生成 RSS XML | `--new-top-n`、`--output-root`、`--backend` |
+| `b2p-gen-index` | 生成订阅首页 HTML | `--output`（默认 `<output-root>/index.html`）、`--backend` |
+| `b2p-sync` | 把 `output/` 镜像到桶（远端模式下为空操作） | `--output-root`、`--backend` |
+| `b2p-size` | 打印 `output/`（或桶）各子目录体积 | `--output-root`、`--backend` |
+| `b2p-cron` | 每 24h 跑一轮 prune→fetch→summarize→rss→gen-index→sync | `--config`、`--backend` |
 | `bash start.sh` | 全流程 + 体积统计 | — |
 | `tools/weekly_run.py` | 跑一轮全流程并输出「日志 + RSS 变化 + 失败分类」的 JSON 汇总 | `--root`、`--keep-snapshots` |
 | `tools/rss_diff.py` | 比较两份 RSS 快照，列出每个 feed 的新增/删除/变更 | `BEFORE_DIR AFTER_DIR` |
@@ -169,6 +195,8 @@ output/
 
 ### 同步规则（`b2p-sync`）
 
+`b2p-sync` 只在 `local` 模式下有实际作用：把本地 `output/` 镜像到桶。
+
 | 情况 | 行为 |
 |---|---|
 | 本地有、远端无 | 上传 |
@@ -179,6 +207,42 @@ output/
 | 单个文件失败 | 记入 `failed`，`b2p-sync` 以非零码退出 |
 
 上传时按扩展名设置 `ContentType`（`m4a → audio/mp4`、`xml → application/xml`、`html → text/html`），并设置 `Cache-Control`：音频/封面 `immutable`，其余 `max-age=300`。
+
+在 `s3`/`r2` 模式下产物已经是直接写进桶的，`b2p-sync` 变成空操作（打印一行说明后返回 0），避免「用空的本地目录反向删掉远端」。
+
+### 清理规则（`b2p-prune`）
+
+合集和它的 feed 必须同生共死：合集目录被删之后，`rss/{kind}/{sid}.xml` 里的每一个 episode 都会指向 404。所以 `b2p-prune` 会连带处理 feed。
+
+| 情况 | 行为 |
+|---|---|
+| 合集目录不在 `sources.json` 里 | 删目录，并删掉对应的 `rss/{kind}/{sid}.xml` |
+| `rss/{kind}/` 下 sid 不在 `sources.json` 里（孤儿 feed） | 删掉这份 feed |
+| `rss/new.xml` | 不按 sid 删——所有 new 合集共用这一份 |
+| `--dry-run` | 只打印 `would delete (...)`，不真的删 |
+
+> 孤儿 feed 是历史遗留问题：目录早被删了，feed 却留在桶里，订阅者看到的是一堆 404。
+> 修复后每轮 `b2p-prune` 都会自动清掉它们。
+
+### 响度归一化
+
+新下载的音频会经过 ffmpeg `loudnorm` 归一化到 **−16 LUFS**（Apple Podcasts 的推荐值），
+真峰值留足余量以避免 AAC 编码后削波。实测：一个 −34.7 LUFS 的源文件处理后为
+**−16.3 LUFS / 真峰值 −0.4 dBFS**，体积反而略降（−5%）。
+
+| 项 | 值 |
+|---|---|
+| 目标响度 | −16 LUFS |
+| 响度范围 LRA | 11 LU |
+| 真峰值目标（送入 loudnorm） | −3 dBTP（AAC 编码会再冲高约 2.6 dB） |
+| 输出编码 | AAC-LC 64 kbps / 48 kHz / 立体声 |
+
+关闭：`export B2P_NORMALIZE_LOUDNESS=0` 或 `audio.normalize_loudness: false`。
+
+> 归一化只对**新下载**的音频生效，历史已发布的音频不会被重写。
+> 代价：每集多花约 1 分钟分析 + 1 分钟编码（600 秒音频共约 3 分钟），
+> 且需要机器上有 ffmpeg。
+
 
 ## 定时运行
 
@@ -217,12 +281,14 @@ src/bilibili_podcast/
 ├── config_loader.py       # config.yaml + sources.json → 活动合集列表
 ├── extract_url.py         # 合集 URL 解析与校验
 ├── storage.py             # S3/R2 镜像与反向拉取（内容比对、Content-Type、并发）
+├── store.py               # 存储抽象层：LocalStore / S3Store / Stage（远端工作目录）
 ├── rss.py                 # RSS XML 生成（路径全部由 output_root 推导）
 ├── xml_template.py        # RSS 模板
 ├── logger.py
 ├── bilibili/
 │   ├── channel.py         # 合集遍历、视频下载调度
 │   ├── audio.py           # yt-dlp + playurl 兜底、封面下载
+│   ├── loudness.py        # ffmpeg loudnorm 响度测量与归一化
 │   ├── credential.py      # Cookie 解析与 yt-dlp 安全副本文档
 │   ├── meta.py            # 本地 JSON 读写、complete 标记与音频存在性校验
 │   └── retry.py           # 412 / -352 退避重试
@@ -248,6 +314,14 @@ src/bilibili_podcast/
 
 **Q：音频太大？**
 默认 `worstaudio`（最低码率）。要换容器改 `src/bilibili_podcast/config.py` 的 `AUDIO_FORMAT`（支持 `m4a` / `mp3` / `opus` / `flac`，RSS 的 `enclosure type` 会自动跟随）。
+
+**Q：声音比别的播客小？**
+新下载的音频会自动归一化到 −16 LUFS（Apple Podcasts 标准），用 `export B2P_NORMALIZE_LOUDNESS=0` 可关闭。
+**历史已发布的音频不会被自动重写**——如果那些旧的也偏轻，需要单独跑一次批量处理。
+
+**Q：直连对象存储后，本地还需要留 output/ 吗？**
+不需要。`storage.backend: r2` 时本地只留临时工作目录（下载/转码用，跑完即删）。
+`b2p-pull` 仍可用于把桶里的东西拉回本地做离线分析。
 
 **Q：description 里没有 AI 总结？**
 B站只为部分视频生成了 AI 总结（本地实测约 85%），取不到时 description 回退到 UP 主简介。没取到结果的视频会在 7 天后自动重试（B站可能事后补生成）；想立刻重抓用 `b2p-summarize --force`。该接口需要登录 Cookie，匿名会返回 -101。
