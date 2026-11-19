@@ -48,8 +48,10 @@ sources.json (合集 URL)
 | 依赖 | 说明 |
 |---|---|
 | Python **3.11+** | 使用 `datetime.UTC` 等 3.11 特性 |
-| **ffmpeg** | yt-dlp 抽音频用；`brew install ffmpeg` / `apt install ffmpeg` |
+| **ffmpeg** | yt-dlp 抽音频 + 响度归一化都要用；`brew install ffmpeg` / `apt install ffmpeg`（容器里可用静态版：`https://johnvansickle.com/ffmpeg/releases/`） |
 | **B站登录 Cookie** | 视频详情接口与下载在匿名状态下会返回 412，必须登录态 |
+
+> ffmpeg 缺失时不会静默降级：抽音频会直接失败。响度归一化失败则只记警告、保留原音频（见「响度归一化」）。
 
 ### 1. 解压 vendored 依赖
 
@@ -243,6 +245,19 @@ output/
 > 代价：每集多花约 1 分钟分析 + 1 分钟编码（600 秒音频共约 3 分钟），
 > 且需要机器上有 ffmpeg。
 
+真实流水线跑出的新音频实测（远端模式，5 集）：
+
+| 音频 | 归一化前 | 归一化后 | 真峰值 |
+|---|---|---|---|
+| BV1HbsH6FEPP | −15.3 LUFS | **−15.7** | −0.9 dBFS |
+| BV16asg6tENZ | −13.4 LUFS | **−15.7** | +0.3 dBFS |
+| BV1xjsk6fEoi | −13.3 LUFS | **−16.1** | −0.8 dBFS |
+| BV1X5sU6WEM7 | −20.0 LUFS | **−15.9** | −4.5 dBFS |
+| BV154WT63E6u | −15.3 LUFS | **−15.9** | −3.7 dBFS |
+
+> 注：AAC 编码会在 loudnorm 限幅之后再冲高约 2.6 dB，所以送入 loudnorm 的
+> 真峰值目标设为 −3 dBTP，实测输出均在 0 dBFS 以内。
+
 
 ## 定时运行
 
@@ -311,6 +326,13 @@ src/bilibili_podcast/
 
 **Q：某个视频下载失败会中断整轮吗？**
 不会。单视频失败只记 error 并跳过（没有 `complete` 就不会进 RSS），重跑 `b2p-fetch` 会自动重试。
+单个**合集**拉取失败（比如 B 站 API 偶发 −503）也只会跳过该合集，不影响其它合集。
+
+**Q：下载全部失败，日志里报 HTTP 403 / 567？**
+这是 B 站 CDN 的行为，不是 Cookie 过期也不是 yt-dlp 版本问题。不带 `Range` 头的完整 GET
+会被边缘节点回「Access Denied」403；只有带**有界** `Range`（如 `bytes=0-1048575`）的请求
+才返回 206。当前实现固定按 1 MiB 分块请求，yt-dlp 路径也通过 `http_chunk_size` 走同样的
+分块模式。若将来又出现大面积 403，先确认请求头里有 `Range`。
 
 **Q：音频太大？**
 默认 `worstaudio`（最低码率）。要换容器改 `src/bilibili_podcast/config.py` 的 `AUDIO_FORMAT`（支持 `m4a` / `mp3` / `opus` / `flac`，RSS 的 `enclosure type` 会自动跟随）。
