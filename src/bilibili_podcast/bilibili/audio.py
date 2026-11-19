@@ -48,6 +48,12 @@ _CDN_HEADERS = {
 _DOWNLOAD_CHUNK = 1 << 16
 _DOWNLOAD_ATTEMPTS = 5
 
+#: 分块 Range 请求的块大小。B 站的 CDN 边缘节点（Akamai）对**不带 Range
+#: 头**的完整 GET 会直接回 403 "Access Denied"，只有带 Range 的部分请求才
+#: 放行。实测 `Range: bytes=0-` 在部分节点仍被拒，而**有界**的
+#: `Range: bytes=0-1048575` 两个节点都返回 206，所以下载必须分块走。
+_RANGE_BLOCK = 1 << 20
+
 
 def _remove_stale_partials(video_dir: Path, bv: str) -> None:
     """Drop leftover partial downloads for ``bv``.
@@ -73,45 +79,68 @@ def _md5(path: Path) -> str:
 
 
 def _download_stream(url: str, dest: Path) -> None:
-    """Download ``url`` to ``dest``, resuming with Range and verifying MD5.
+    """Download ``url`` to ``dest`` using bounded Range requests, verifying MD5.
 
-    A broken CDN edge may answer HTTP 200 with the right Content-Length and then
-    close the connection halfway through. Resuming makes a transient drop cheap;
-    the final size + ``X-Upos-Md5`` check rejects a permanently truncated object
-    so the caller can move on to the next mirror.
+    Two CDN behaviours shape this function:
+
+    * **Bounded Range is mandatory.** Bilibili's CDN edge answers a plain GET
+      with HTTP 403 "Access Denied", no matter how complete the browser
+      headers are. Only a request carrying ``Range`` is served, so the body is
+      pulled block by block (``_RANGE_BLOCK`` bytes each).
+    * **A broken edge may answer 200 with the right Content-Length and then
+      close the connection halfway through.** Resuming makes a transient drop
+      cheap; the final size + ``X-Upos-Md5`` check rejects a permanently
+      truncated object so the caller can move on to the next mirror.
+
+    The server advertises the total size in ``Content-Range`` and the expected
+    checksum in ``X-Upos-Md5``, so a partial download is always detectable.
     """
     expected_md5: str | None = None
     expected_size: int | None = None
 
     for _ in range(_DOWNLOAD_ATTEMPTS):
         pos = dest.stat().st_size if dest.exists() else 0
-        headers = dict(_CDN_HEADERS)
-        if pos:
-            headers["Range"] = f"bytes={pos}-"
-        try:
-            with requests.get(
-                url, headers=headers, stream=True, timeout=(10, 60)
-            ) as response:
-                if response.status_code == 416:
-                    break
-                response.raise_for_status()
-                expected_md5 = response.headers.get("X-Upos-Md5") or expected_md5
-                length = int(response.headers.get("Content-Length") or 0)
-                if response.status_code == 200 and pos:
-                    # Server ignored Range: restart instead of appending a duplicate.
-                    dest.unlink(missing_ok=True)
-                    pos = 0
-                if length:
-                    expected_size = pos + length
-                with dest.open("ab") as handle:
-                    for chunk in response.iter_content(_DOWNLOAD_CHUNK):
-                        if chunk:
-                            handle.write(chunk)
-        except (requests.RequestException, OSError) as exc:
-            written = dest.stat().st_size if dest.exists() else 0
-            logger.warning(f"===> download interrupted at {written} bytes: {exc}")
-            continue
+        while True:
+            headers = dict(_CDN_HEADERS)
+            headers["Range"] = f"bytes={pos}-{pos + _RANGE_BLOCK - 1}"
+            try:
+                with requests.get(
+                    url, headers=headers, stream=True, timeout=(10, 60)
+                ) as response:
+                    if response.status_code == 416:
+                        break
+                    response.raise_for_status()
+                    expected_md5 = response.headers.get("X-Upos-Md5") or expected_md5
+                    content_range = response.headers.get("Content-Range") or ""
+                    if "/" in content_range:
+                        total = content_range.rsplit("/", 1)[-1]
+                        if total.isdigit():
+                            expected_size = int(total)
+                    length = int(response.headers.get("Content-Length") or 0)
+                    if response.status_code == 200 and pos:
+                        # Server ignored Range: restart instead of appending a duplicate.
+                        dest.unlink(missing_ok=True)
+                        pos = 0
+                    if length and expected_size is None:
+                        expected_size = pos + length
+                    with dest.open("ab") as handle:
+                        for chunk in response.iter_content(_DOWNLOAD_CHUNK):
+                            if chunk:
+                                handle.write(chunk)
+            except (requests.RequestException, OSError) as exc:
+                written = dest.stat().st_size if dest.exists() else 0
+                logger.warning(f"===> download interrupted at {written} bytes: {exc}")
+                break
 
+            size = dest.stat().st_size if dest.exists() else 0
+            if expected_size is not None and size >= expected_size:
+                break
+            if size <= pos:
+                # No progress (e.g. the edge answered 200 with an empty body):
+                # retry the same range instead of spinning forever.
+                logger.warning(f"===> download stalled at {size}/{expected_size} bytes")
+                break
+            pos = size
         size = dest.stat().st_size if dest.exists() else 0
         if expected_size is None or size >= expected_size:
             break
@@ -225,6 +254,13 @@ def _download_audio_local(ref: "ChannelRef", bv: str, work_dir: Path) -> Path:
                 "retries": 10,
                 "fragment_retries": 10,
                 "file_access_retries": 3,
+                # Bilibili's CDN answers a plain GET with 403 "Access Denied".
+                # A bounded Range request is served, so force yt-dlp into its
+                # chunked mode (``http_chunk_size`` makes it send
+                # ``Range: bytes=N-N+chunk``) and hand it the headers the edge
+                # expects.
+                "http_headers": dict(_CDN_HEADERS),
+                "http_chunk_size": _RANGE_BLOCK,
             }
             try:
                 with yt_dlp.YoutubeDL(opts) as ydl:  # pyright: ignore[reportArgumentType]

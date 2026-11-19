@@ -224,6 +224,80 @@ def test_download_audio_uses_playurl_mirror_after_ytdlp_fails():
     mock_fallback.assert_called_once_with("BV1xx", video_dir)
 
 
+def test_download_stream_always_sends_bounded_range(tmp_path: Path):
+    """B 站 CDN 只放行带 Range 的请求。
+
+    实测：不带 Range 的完整 GET 会被边缘节点回 403 "Access Denied"，即使
+    cookie、Referer、完整浏览器头都带上也一样；只有带 Range 的部分请求才
+    返回 206。所以首次请求就必须带 Range，且必须是有界的（``bytes=0-``
+    在部分节点仍被拒）。
+    """
+    payload = b"0123456789"
+    digest = hashlib.md5(payload).hexdigest()
+    dest = tmp_path / "a.m4s"
+
+    class FakeResponse:
+        status_code = 206
+        headers = {
+            "Content-Length": str(len(payload)),
+            "Content-Range": f"bytes 0-{len(payload) - 1}/{len(payload)}",
+            "X-Upos-Md5": digest,
+        }
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def raise_for_status(self):
+            return None
+
+        def iter_content(self, size):
+            yield payload
+
+    seen_headers: list[dict] = []
+
+    def fake_get(url, headers, stream, timeout):
+        seen_headers.append(headers)
+        return FakeResponse()
+
+    from bilibili_podcast.bilibili.audio import _download_stream
+    with patch("bilibili_podcast.bilibili.audio.requests.get", side_effect=fake_get):
+        _download_stream("https://cdn.example/a.m4s", dest)
+
+    assert dest.read_bytes() == payload
+    assert seen_headers[0]["Range"] == "bytes=0-1048575"
+
+
+def test_download_stream_uses_content_range_total_size(tmp_path: Path):
+    """总长度取自 Content-Range，避免被 Content-Length（分块长度）误导。"""
+    payload = b"0123456789"
+    dest = tmp_path / "a.m4s"
+
+    class FakeResponse:
+        status_code = 206
+        # Content-Length 只覆盖这一块（4 字节），总长在 Content-Range 里。
+        headers = {"Content-Length": "4", "Content-Range": "bytes 0-3/10"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def raise_for_status(self):
+            return None
+
+        def iter_content(self, size):
+            yield payload[:4]
+
+    from bilibili_podcast.bilibili.audio import _download_stream
+    with patch("bilibili_podcast.bilibili.audio.requests.get", return_value=FakeResponse()):
+        with pytest.raises(RuntimeError, match="incomplete download"):
+            _download_stream("https://cdn.example/a.m4s", dest)
+
+
 def test_download_via_playurl_prefers_official_backup():
     streams = [{
         "id": 30216,
@@ -275,14 +349,22 @@ def test_download_stream_resumes_with_range_and_checks_md5(tmp_path: Path):
 
     responses = [
         FakeResponse(
-            200,
-            {"Content-Length": str(len(payload)), "X-Upos-Md5": digest},
+            206,
+            {
+                "Content-Length": "4",
+                "Content-Range": f"bytes 0-3/{len(payload)}",
+                "X-Upos-Md5": digest,
+            },
             [payload[:4]],
             requests.exceptions.ChunkedEncodingError("broken"),
         ),
         FakeResponse(
             206,
-            {"Content-Length": str(len(payload) - 4), "X-Upos-Md5": digest},
+            {
+                "Content-Length": str(len(payload) - 4),
+                "Content-Range": f"bytes 4-{len(payload) - 1}/{len(payload)}",
+                "X-Upos-Md5": digest,
+            },
             [payload[4:]],
         ),
     ]
@@ -297,8 +379,9 @@ def test_download_stream_resumes_with_range_and_checks_md5(tmp_path: Path):
         _download_stream("https://backup.example/a.m4s", dest)
 
     assert dest.read_bytes() == payload
-    assert "Range" not in seen_headers[0]
-    assert seen_headers[1]["Range"] == "bytes=4-"
+    # B 站 CDN 只放行带 Range 的请求，所以首次请求就必须带 Range。
+    assert seen_headers[0]["Range"] == "bytes=0-1048575"
+    assert seen_headers[1]["Range"] == "bytes=4-1048579"
 
 
 def test_download_picture_writes_bytes(tmp_path: Path):
